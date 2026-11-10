@@ -87,6 +87,14 @@ nav button[aria-current="true"]{background:var(--tint);color:var(--tintink);font
 .wide.primary{background:var(--accent);color:#fff}
 #toast{position:fixed;left:16px;right:16px;bottom:calc(92px + env(safe-area-inset-bottom));max-width:688px;margin:0 auto;
   background:var(--ink);color:#fff;border-radius:14px;padding:12px 14px;font-size:13px;text-align:center;z-index:5}
+.ed{border-top:1px solid var(--line);padding-top:12px;margin-top:12px}
+.ed:first-child{border-top:0;padding-top:0;margin-top:0}
+.ed label{display:block;font-size:12px;font-weight:600;color:var(--mute);margin-top:10px}
+.ed label input{margin-top:4px}
+.ed .chk{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--ink);margin-top:12px;min-height:44px}
+.ed .chk input{width:22px;height:22px;margin:0;accent-color:var(--accent)}
+.ed .rm{background:var(--badbg);color:var(--bad);margin-top:8px;width:100%}
+.badge{font-size:11px;font-weight:700;background:var(--pop);color:var(--ink);border-radius:6px;padding:2px 6px;margin-left:6px;vertical-align:2px}
 /* lock screen */
 #lock{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
   margin-bottom:calc(-96px - env(safe-area-inset-bottom))}
@@ -227,7 +235,7 @@ function render(d) {
     </div>
     <h2>Team</h2>
     <div class="card">${(d.team || []).map(m => `
-      <div class="row mid">${m.name ? `<div class="av" aria-hidden="true">${esc(m.name.trim().charAt(0).toUpperCase())}</div>` : '<div class="av none" aria-hidden="true"></div>'}<div class="grow"><div>${m.name ? esc(m.name) : '<span class="mute" style="font-weight:400">To be added</span>'}</div>
+      <div class="row mid">${m.name ? `<div class="av" aria-hidden="true">${esc(m.name.trim().charAt(0).toUpperCase())}</div>` : '<div class="av none" aria-hidden="true"></div>'}<div class="grow"><div>${m.name ? esc(m.name) + (m.admin ? '<span class="badge">Admin</span>' : "") : '<span class="mute" style="font-weight:400">To be added</span>'}</div>
       ${m.contact ? `<div class="mute small">${esc(m.contact)}</div>` : ""}${m.notes ? `<div class="mute small">${esc(m.notes)}</div>` : ""}</div>
       <span class="pill ${m.name ? "tint" : ""}">${esc(m.role)}</span></div>`).join("") || '<div class="mute">No team members yet.</div>'}</div>
     <h2>${esc(offer.heading || "What we provide")}</h2>
@@ -263,7 +271,8 @@ function render(d) {
   s.log = `<h2>Daily Update Log</h2>` + (log.length ? [...log].reverse().map(logCard).join("") : empty("No updates yet."));
 
   s.profile = profileHtml(d);
-  $("main").innerHTML = [...TABS, ["profile"]].map(([id]) => `<section id="s-${id}" hidden>${s[id]}</section>`).join("");
+  s.admin = adminHtml(d);
+  $("main").innerHTML = [...TABS, ["profile"], ["admin"]].map(([id]) => `<section id="s-${id}" hidden>${s[id]}</section>`).join("");
   show(location.hash.slice(1));
 }
 function logCard(l) {
@@ -271,8 +280,9 @@ function logCard(l) {
     ${l.followup ? `<div class="note"><span style="font-weight:700">To follow up</span><br>${esc(l.followup)}</div>` : ""}</div>`;
 }
 function show(id) {
-  if (id !== "profile" && !TABS.some(t => t[0] === id)) id = "overview";
-  [...TABS, ["profile"]].forEach(([t]) => { const el = $("s-" + t); if (el) el.hidden = t !== id; });
+  if (id === "admin" && !isAdmin()) id = "profile";
+  if (id !== "profile" && id !== "admin" && !TABS.some(t => t[0] === id)) id = "overview";
+  [...TABS, ["profile"], ["admin"]].forEach(([t]) => { const el = $("s-" + t); if (el) el.hidden = t !== id; });
   document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-current", b.dataset.tab === id ? "true" : "false"));
   window.scrollTo(0, 0);
 }
@@ -397,17 +407,138 @@ function setWho(p) {
   $("who").textContent = p ? "Hi " + p.name : "";
   $("profbtn").textContent = p && p.name ? p.name.trim().charAt(0).toUpperCase() : "·";
 }
+// ---- Admin: edit the team list and publish it to GitHub from this phone ----
+// The GitHub token is stored on this phone only, encrypted with the team key.
+const REPO = "yyleong511-png/campaign-tracker", DATA_PATH = "data.enc.json";
+let draft = null; // working copy of the team list while editing
+function findMe(d) {
+  const p = profile(); if (!p || !p.name) return null;
+  const n = p.name.trim().toLowerCase();
+  return (d.team || []).find(m => m.name && (m.name.toLowerCase() === n || m.name.toLowerCase().startsWith(n + " "))) || null;
+}
+function isAdmin() { const me = lastData && findMe(lastData); return !!(me && me.admin); }
+async function teamKey(usage) { return crypto.subtle.importKey("raw", rawKey, "AES-GCM", false, usage); }
+async function getToken() {
+  const p = profile(); if (!p || !p.gh || !rawKey) return null;
+  try { return new TextDecoder().decode(await crypto.subtle.decrypt({name: "AES-GCM", iv: unb64(p.gh.iv)}, await teamKey(["decrypt"]), unb64(p.gh.ct))); }
+  catch (e) { return null; }
+}
+async function saveToken(tok) {
+  const p = profile(); const iv = rnd(12);
+  const ct = await crypto.subtle.encrypt({name: "AES-GCM", iv}, await teamKey(["encrypt"]), new TextEncoder().encode(tok));
+  p.gh = {iv: b64(iv), ct: b64(ct)}; sset(PROFILE, JSON.stringify(p));
+}
+async function gh(tok, method, body) {
+  const r = await fetch(`https://api.github.com/repos/${REPO}/contents/${DATA_PATH}` + (method === "GET" ? "?ref=main&t=" + Date.now() : ""), {
+    method, cache: "no-store",
+    headers: {"Authorization": "Bearer " + tok, "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"},
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if (r.status === 401 || r.status === 403) throw new Error("auth");
+  if (r.status === 409 || r.status === 422) throw new Error("conflict");
+  if (!r.ok) throw new Error("gh" + r.status);
+  return r.json();
+}
+async function publish(mutate, message) {
+  const tok = await getToken(); if (!tok) throw new Error("notoken");
+  const file = await gh(tok, "GET");
+  const enc = JSON.parse(atob(file.content.replace(/\s/g, "")));
+  const d = await decrypt(rawKey, enc);           // edit the latest version, not a stale copy
+  mutate(d);
+  d.updated = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  const iv = rnd(12);
+  const ct = await crypto.subtle.encrypt({name: "AES-GCM", iv}, await teamKey(["encrypt"]), new TextEncoder().encode(JSON.stringify(d)));
+  const out = {v: enc.v, iter: enc.iter, salt: enc.salt, iv: b64(iv), ct: b64(ct)};
+  await gh(tok, "PUT", {message, sha: file.sha, branch: "main", content: btoa(JSON.stringify(out))});
+  return d;
+}
+function adminHtml(d) {
+  if (!isAdmin()) return "";
+  const hasTok = !!(profile() || {}).gh;
+  if (!draft) draft = JSON.parse(JSON.stringify(d.team || []));
+  return `<h2>Admin · Team</h2>
+    ${hasTok ? "" : `<form class="card" id="ad-tok-form" autocomplete="off">
+      <div style="font-weight:700">Connect GitHub (once on this phone)</div>
+      <div class="mute small" style="margin-top:4px">Paste a GitHub token that can write to the campaign-tracker repo. It stays on this phone, encrypted.</div>
+      <input id="ad-tok" type="password" placeholder="github_pat_…" autocapitalize="off" autocorrect="off" spellcheck="false" required>
+      <button class="wide primary" type="submit">Connect</button>
+    </form>`}
+    <div class="card" id="ad-list">${draft.map((m, i) => `
+      <div class="ed" data-i="${i}">
+        <label>Name<input data-f="name" value="${esc(m.name)}" placeholder="Full name" maxlength="40"></label>
+        <label>Role<input data-f="role" value="${esc(m.role)}" placeholder="e.g. Model" maxlength="40"></label>
+        <label>Contact<input data-f="contact" value="${esc(m.contact)}" placeholder="Phone, Instagram…" maxlength="80"></label>
+        <label>Notes<input data-f="notes" value="${esc(m.notes)}" maxlength="120"></label>
+        <label class="chk"><input type="checkbox" data-f="admin" ${m.admin ? "checked" : ""}>Admin (can edit the team)</label>
+        <button class="rm" data-act="rm">Remove</button>
+      </div>`).join("") || '<div class="mute">No team members.</div>'}</div>
+    <button class="wide" data-act="add">+ Add member</button>
+    <button class="wide primary" data-act="save" ${hasTok ? "" : "disabled"}>Save for everyone</button>
+    <button class="wide" data-act="back">Back to profile</button>
+    ${hasTok ? `<button class="wide" data-act="untok" style="color:var(--mute)">Disconnect GitHub on this phone</button>` : ""}
+    <div class="mute small" style="margin:12px 4px">After saving, others see the change within a few minutes when they reopen or tap Refresh.</div>`;
+}
+function syncDraft() {
+  document.querySelectorAll("#ad-list .ed").forEach(el => {
+    const m = draft[+el.dataset.i]; if (!m) return;
+    el.querySelectorAll("[data-f]").forEach(inp => { m[inp.dataset.f] = inp.type === "checkbox" ? inp.checked : inp.value.trim(); });
+  });
+}
+function rerenderAdmin() { $("s-admin").innerHTML = adminHtml(lastData); }
+$("main").addEventListener("click", async ev => {
+  const b = ev.target.closest("button"); if (!b) return;
+  if (b.id === "pf-admin") { draft = null; rerenderAdmin(); history.replaceState(null, "", "#admin"); show("admin"); return; }
+  const act = b.dataset.act; if (!act || !b.closest("#s-admin")) return;
+  syncDraft();
+  if (act === "add") { draft.push({name: "", role: "", contact: "", notes: ""}); rerenderAdmin(); const all = document.querySelectorAll("#ad-list .ed"); all[all.length - 1].querySelector("input").focus(); }
+  else if (act === "rm") { draft.splice(+b.closest(".ed").dataset.i, 1); rerenderAdmin(); }
+  else if (act === "back") { draft = null; history.replaceState(null, "", "#profile"); show("profile"); }
+  else if (act === "untok") { const p = profile(); delete p.gh; sset(PROFILE, JSON.stringify(p)); rerenderAdmin(); toast("GitHub disconnected on this phone."); }
+  else if (act === "save") {
+    const team = draft.filter(m => m.name || m.role).map(m => { const o = {name: m.name || "", role: m.role || "", contact: m.contact || "", notes: m.notes || ""}; if (m.admin) o.admin = true; return o; });
+    if (!team.some(m => m.admin)) { toast("Keep at least one admin."); return; }
+    const myName = (findMe(lastData) || {}).name;
+    if (myName && !team.some(m => m.admin && m.name === myName)) { toast("You can't remove your own admin access here."); return; }
+    b.disabled = true; b.textContent = "Saving…";
+    try {
+      const d = await publish(x => { x.team = team; }, "Update team list from admin");
+      draft = null; showApp(d); history.replaceState(null, "", "#admin"); show("admin"); toast("Saved. Everyone will see it in a few minutes.");
+    } catch (e) {
+      const m = e.message;
+      toast(m === "auth" ? "GitHub token not accepted. Disconnect and connect a new one." : m === "conflict" ? "Someone saved at the same time. Tap Save again." : m === "notoken" ? "Connect GitHub first." : "Could not save. Check your connection and try again.");
+      b.disabled = false; b.textContent = "Save for everyone";
+    }
+  }
+});
+$("main").addEventListener("submit", async ev => {
+  if (ev.target.id !== "ad-tok-form") return;
+  ev.preventDefault(); syncDraft();
+  const tok = $("ad-tok").value.trim(); if (!tok) return;
+  const btn = ev.target.querySelector("button"); btn.disabled = true; btn.textContent = "Checking…";
+  try {
+    await gh(tok, "GET");
+    await saveToken(tok); rerenderAdmin(); toast("GitHub connected.");
+  } catch (e) {
+    toast(e.message === "auth" ? "That token can't access the repo. Check its permissions." : "Could not reach GitHub. Try again.");
+    btn.disabled = false; btn.textContent = "Connect";
+  }
+}, true);
 function profileHtml(d) {
   const p = profile() || {name: ""};
-  const n = (p.name || "").toLowerCase();
-  const me = (d.team || []).find(m => m.name && (m.name.toLowerCase() === n || m.name.toLowerCase().startsWith(n + " ")));
+  const me = findMe(d);
   const bioOk = !!window.PublicKeyCredential;
   return `<h2>My Profile</h2>
     <div class="card">
       <div class="row"><div class="k">Name</div><div class="v">${esc(p.name)}</div></div>
       <div class="row"><div class="k">Role</div><div class="v">${me ? esc(me.role) : '<span class="mute">Not on the team list yet</span>'}</div></div>
+      <div class="row"><div class="k">Access</div><div class="v">${me && me.admin ? "Admin" : "Member"}</div></div>
       <div class="row"><div class="k">Unlock with</div><div class="v">Personal password${p.bio ? "<br>Face ID / fingerprint" : ""}</div></div>
     </div>
+    ${me && me.admin ? `<h2>Admin</h2>
+    <div class="card">
+      <div class="mute small">Add or edit team members. Changes are saved for everyone.</div>
+      <button class="wide primary" id="pf-admin">Manage team</button>
+    </div>` : ""}
     <h2>Face ID / fingerprint</h2>
     <div class="card">
       <div class="mute small">${p.bio ? "On for this phone. You can still use your personal password." : bioOk ? "Unlock with Face ID, fingerprint or your phone screen lock instead of typing your password." : "This browser does not support it. Keep using your personal password."}</div>
