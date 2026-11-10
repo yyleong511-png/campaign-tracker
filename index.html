@@ -269,8 +269,15 @@ function render(d) {
       <button class="wide primary" type="submit">Submit</button>`
       : `<div class="note">Team updates are off. Ask an admin to turn them on.</div>`}
     </form>
-    ${inbox.length ? `<h2>Waiting to be sorted (${inbox.length})</h2>
-    <div class="card">${[...inbox].reverse().map(x => `<div class="inbox-item"><div class="who2">${esc(x.by || "Someone")} · ${esc(fmtWhen(x.at))}</div><div class="txt">${esc(x.text)}</div></div>`).join("")}</div>` : ""}
+    ${(() => {
+      const me = ((profile() || {}).name || "").trim().toLowerCase();
+      const admin = isAdmin();
+      const mine = admin ? inbox : inbox.filter(x => (x.by || "").trim().toLowerCase() === me);
+      if (!mine.length) return "";
+      return `<h2>${admin ? "Waiting for review" : "Your updates, waiting to be sorted"} (${mine.length})</h2>
+    ${admin ? `<button class="wide primary" id="ov-review" style="margin-top:0">Review updates</button>` : ""}
+    <div class="card">${[...mine].reverse().map(x => `<div class="inbox-item"><div class="who2">${esc(x.by || "Someone")} · ${esc(fmtWhen(x.at))}</div><div class="txt">${esc(x.text)}</div></div>`).join("")}</div>`;
+    })()}
     <div class="stats">
       <div class="stat hot"><b>${open}</b><span>Open tasks</span></div>
       <div class="stat"><b>${out.length}</b><span>Brands</span></div>
@@ -454,6 +461,7 @@ function setWho(p) {
 // The GitHub token is stored on this phone only, encrypted with the team key.
 const REPO = "yyleong511-png/campaign-tracker", DATA_PATH = "data.enc.json";
 let draft = null; // working copy of the team list while editing
+let reviewSel = null, reviewKnown = null; // which inbox items are ticked for Claude
 function findMe(d) {
   const p = profile(); if (!p || !p.name) return null;
   const n = p.name.trim().toLowerCase();
@@ -504,7 +512,22 @@ function adminHtml(d) {
   if (!isAdmin()) return "";
   const hasTok = !!(profile() || {}).gh;
   if (!draft) draft = JSON.parse(JSON.stringify(d.team || []));
-  return `<h2>Admin · Team</h2>
+  const inbox = d.inbox || [];
+  if (!reviewSel) { reviewSel = new Set(); reviewKnown = new Set(); }
+  inbox.forEach(x => { if (!reviewKnown.has(x.at)) { reviewKnown.add(x.at); reviewSel.add(x.at); } }); // new updates start ticked
+  const review = `<h2>Review updates (${inbox.length})</h2>
+    ${inbox.length ? `<div class="card" id="rv-list">${inbox.map(x => `
+      <div class="ed" data-at="${esc(x.at)}">
+        <label class="chk" style="margin-top:0;align-items:flex-start"><input type="checkbox" data-rv ${reviewSel.has(x.at) ? "checked" : ""} style="margin-top:2px">
+          <span><span class="who2" style="display:block;font-size:12px;font-weight:700;color:var(--tintink)">${esc(x.by || "Someone")} · ${esc(fmtWhen(x.at))}</span>
+          <span style="white-space:pre-wrap">${esc(x.text)}</span></span></label>
+        <button class="rm" data-act="dismiss" ${hasTok ? "" : "disabled"}>Dismiss</button>
+      </div>`).join("")}</div>
+    <button class="wide primary" data-act="copy">Copy ticked for Claude</button>
+    <div class="mute small" style="margin:10px 4px 0">Paste it in your Claude chat. Claude sorts it into the tracker and clears these from the list.</div>
+    <textarea id="rv-out" readonly hidden style="width:100%;min-height:160px;margin-top:10px;font:inherit;font-size:14px;border-radius:14px;border:0;padding:12px;background:var(--panel)"></textarea>`
+    : `<div class="empty">Nothing to review.</div>`}`;
+  return review + `<h2>Admin · Team</h2>
     ${hasTok ? "" : `<form class="card" id="ad-tok-form" autocomplete="off">
       <div style="font-weight:700">Connect GitHub (once on this phone)</div>
       <div class="mute small" style="margin-top:4px">Paste a GitHub token that can write to the campaign-tracker repo. It stays on this phone, encrypted.</div>
@@ -537,12 +560,36 @@ function syncDraft() {
     el.querySelectorAll("[data-f]").forEach(inp => { m[inp.dataset.f] = inp.type === "checkbox" ? inp.checked : inp.value.trim(); });
   });
 }
+function syncReview() {
+  if (!reviewSel) return;
+  document.querySelectorAll("#rv-list .ed").forEach(el => {
+    const cb = el.querySelector("[data-rv]"); if (cb.checked) reviewSel.add(el.dataset.at); else reviewSel.delete(el.dataset.at);
+  });
+}
 function rerenderAdmin() { $("s-admin").innerHTML = adminHtml(lastData); }
 $("main").addEventListener("click", async ev => {
   const b = ev.target.closest("button"); if (!b) return;
-  if (b.id === "pf-admin") { draft = null; rerenderAdmin(); history.replaceState(null, "", "#admin"); show("admin"); return; }
+  if (b.id === "ov-review") { draft = null; reviewSel = null; rerenderAdmin(); history.replaceState(null, "", "#admin"); show("admin"); return; }
+  if (b.id === "pf-admin") { draft = null; reviewSel = null; rerenderAdmin(); history.replaceState(null, "", "#admin"); show("admin"); return; }
   const act = b.dataset.act; if (!act || !b.closest("#s-admin")) return;
-  syncDraft();
+  syncDraft(); syncReview();
+  if (act === "copy") {
+    const items = (lastData.inbox || []).filter(x => reviewSel.has(x.at));
+    if (!items.length) { toast("Tick at least one update."); return; }
+    const text = "整理 inbox (Campaign Tracker)\n\n" + items.map((x, i) => `${i + 1}. ${x.by || "Someone"} · ${fmtWhen(x.at)} [${x.at}]\n${x.text}`).join("\n\n");
+    const out = $("rv-out"); out.value = text; out.hidden = false;
+    try { await navigator.clipboard.writeText(text); toast("Copied. Paste it in your Claude chat."); }
+    catch (e) { out.focus(); out.select(); toast("Select all and copy the text below."); }
+    return;
+  }
+  if (act === "dismiss") {
+    const at = b.closest(".ed").dataset.at; b.disabled = true;
+    try {
+      const d = await publish(x => { x.inbox = (x.inbox || []).filter(y => y.at !== at); }, "Dismiss an update");
+      reviewSel.delete(at); draft = null; showApp(d); history.replaceState(null, "", "#admin"); show("admin"); toast("Dismissed.");
+    } catch (e) { toast("Could not save. Try again."); b.disabled = false; }
+    return;
+  }
   if (act === "add") { draft.push({name: "", role: "", contact: "", notes: ""}); rerenderAdmin(); const all = document.querySelectorAll("#ad-list .ed"); all[all.length - 1].querySelector("input").focus(); }
   else if (act === "rm") { draft.splice(+b.closest(".ed").dataset.i, 1); rerenderAdmin(); }
   else if (act === "back") { draft = null; history.replaceState(null, "", "#profile"); show("profile"); }
@@ -612,8 +659,8 @@ function profileHtml(d) {
     </div>
     ${me && me.admin ? `<h2>Admin</h2>
     <div class="card">
-      <div class="mute small">Add or edit team members. Changes are saved for everyone.</div>
-      <button class="wide primary" id="pf-admin">Manage team</button>
+      <div class="mute small">Review team updates and manage the team.</div>
+      <button class="wide primary" id="pf-admin">Open admin${(d.inbox || []).length ? ` · ${(d.inbox || []).length} to review` : ""}</button>
     </div>` : ""}
     <h2>Face ID / fingerprint</h2>
     <div class="card">
