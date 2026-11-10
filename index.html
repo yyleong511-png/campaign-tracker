@@ -543,6 +543,7 @@ function adminHtml(d) {
       <div class="ed" data-i="${i}">
         <label>Name<input data-f="name" value="${esc(m.name)}" placeholder="Full name" maxlength="40"></label>
         <label>Role<input data-f="role" value="${esc(m.role)}" placeholder="e.g. Model" maxlength="40"></label>
+        <label>Email (for calendar invites)<input data-f="email" type="email" value="${esc(m.email)}" placeholder="name@gmail.com" maxlength="80" autocapitalize="off"></label>
         <label>Contact<input data-f="contact" value="${esc(m.contact)}" placeholder="Phone, Instagram…" maxlength="80"></label>
         <label>Notes<input data-f="notes" value="${esc(m.notes)}" maxlength="120"></label>
         <label class="chk"><input type="checkbox" data-f="admin" ${m.admin ? "checked" : ""}>Admin (can edit the team)</label>
@@ -604,7 +605,7 @@ $("main").addEventListener("click", async ev => {
   }
   else if (act === "untok") { const p = profile(); delete p.gh; sset(PROFILE, JSON.stringify(p)); rerenderAdmin(); toast("GitHub disconnected on this phone."); }
   else if (act === "save") {
-    const team = draft.filter(m => m.name || m.role).map(m => { const o = {name: m.name || "", role: m.role || "", contact: m.contact || "", notes: m.notes || ""}; if (m.admin) o.admin = true; return o; });
+    const team = draft.filter(m => m.name || m.role).map(m => { const o = {name: m.name || "", role: m.role || "", contact: m.contact || "", notes: m.notes || ""}; if (m.email) o.email = m.email; if (m.admin) o.admin = true; return o; });
     if (!team.some(m => m.admin)) { toast("Keep at least one admin."); return; }
     const myName = (findMe(lastData) || {}).name;
     if (myName && !team.some(m => m.admin && m.name === myName)) { toast("You can't remove your own admin access here."); return; }
@@ -654,6 +655,12 @@ function profileHtml(d) {
     <div class="card">
       <div class="row"><div class="k">Name</div><div class="v">${esc(p.name)}</div></div>
       <div class="row"><div class="k">Role</div><div class="v">${me ? esc(me.role) : '<span class="mute">Not on the team list yet</span>'}</div></div>
+      ${!me && (d.team || []).some(m => !m.name) ? `<div class="row" style="display:block">
+        <div style="font-weight:700">Which role are you?</div>
+        <div class="mute small" style="margin-top:2px">Tap yours to add your name to the team list.</div>
+        ${(d.submitToken || p.gh) ? (d.team || []).map((m, i) => m.name ? "" : `<button class="wide" data-claim="${i}">I'm the ${esc(m.role || "team member")}</button>`).join("")
+          : `<div class="note">Team updates are off. Ask an admin to add you.</div>`}
+      </div>` : ""}
       <div class="row"><div class="k">Access</div><div class="v">${me && me.admin ? "Admin" : "Member"}</div></div>
       <div class="row"><div class="k">Unlock with</div><div class="v">Personal password${p.bio ? "<br>Face ID / fingerprint" : ""}</div></div>
     </div>
@@ -726,6 +733,19 @@ async function bioEnable() {
 }
 $("main").addEventListener("click", async ev => {
   const b = ev.target.closest("button"); if (!b) return;
+  if (b.dataset.claim !== undefined) {
+    const i = +b.dataset.claim, name = ((profile() || {}).name || "").trim(); if (!name) return;
+    b.disabled = true;
+    try {
+      const d = await publish(x => {
+        const slot = (x.team || [])[i];
+        if (!slot || slot.name) throw new Error("taken");
+        slot.name = name;
+      }, name + " joined the team list");
+      showApp(d); history.replaceState(null, "", "#profile"); show("profile"); toast("You're on the team list.");
+    } catch (e) { toast(e.message === "taken" ? "Someone already took that role. Tap Refresh." : "Could not save. Try again."); b.disabled = false; }
+    return;
+  }
   if (b.id === "pf-bio") {
     const p = profile(); if (!p) return;
     if (p.bio) { delete p.bio; saveProfile(p); show("profile"); toast("Face ID / fingerprint unlock is off."); }
