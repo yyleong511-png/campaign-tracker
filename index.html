@@ -131,6 +131,18 @@ header.top #updated,header.top #who{font-size:12px;white-space:nowrap;overflow:h
 #role-btns button[aria-pressed="true"]{background:#231C7A;color:var(--pop);box-shadow:0 0 0 3px var(--pop) inset}
 #role-btns.picking button[aria-pressed="false"]{opacity:.45}
 #lock .err{color:var(--bad);min-height:1.5em;font-size:13px;margin-top:10px}
+.seg{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+.seg button{flex:1 1 auto;padding:9px 8px;font-size:12px;background:var(--bg);min-height:40px}
+.seg button[aria-pressed="true"]{background:var(--accent);color:#fff}
+.mini{display:flex;gap:8px;margin-top:8px}
+.mini button{flex:1;padding:8px;font-size:13px;background:var(--bg);min-height:40px}
+.mytask{padding:11px 0;border-top:1px solid var(--line)}
+.mytask:first-child{border-top:0;padding-top:2px}
+.ed textarea{width:100%;font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:0;border-radius:14px;padding:12px 14px;margin-top:4px;min-height:80px;resize:vertical}
+.ed select{width:100%;font:inherit;font-size:16px;background:var(--bg);border:0;border-radius:14px;padding:12px 14px;margin-top:4px;color:var(--ink)}
+.row.mid .pill{white-space:normal;text-align:right;max-width:52%}
+.nm{white-space:nowrap}
+@media (max-width:380px){header.top h1{white-space:normal;overflow:visible}}
 </style>
 </head>
 <body>
@@ -311,6 +323,7 @@ function tasksHtml(d) {
       const cal = admin ? calUrl(t, d) : "";
       return `<div class="card"><div class="head"><div class="ttl">${esc(t.task)}</div>${pill(t.status)}</div>
       ${meta([["Assigned", assignees(t).join(", ")], ["When", whenText(t)]])}${note(t.notes)}
+      ${(admin || mine(t)) && canWrite(d) ? `<div class="seg" role="group" aria-label="Status">${TASK_STATUS.map(x => `<button data-tstatus="${i}" data-v="${x}" aria-pressed="${(t.status || "Not started") === x}">${x}</button>`).join("")}</div>` : ""}
       ${admin ? `<div style="display:flex;gap:8px;margin-top:12px">
         <button class="wide" data-task="${i}" style="margin:0;flex:1">Edit</button>
         ${cal ? `<a class="wide primary" href="${esc(cal)}" target="_blank" rel="noopener" style="margin:0;flex:1.4;text-align:center;text-decoration:none;border-radius:14px;font-weight:600;display:block">Send calendar invite</a>` : ""}
@@ -355,8 +368,50 @@ function readTaskForm() {
   else if ($("te-deadline")) { t.deadline = $("te-deadline").value; t.time = $("te-time").value; }
   t.assignees = [...document.querySelectorAll("#te-form [data-as]")].filter(x => x.checked).map(x => x.dataset.as);
 }
+function canWrite(d) { return !!((d && d.submitToken) || (profile() || {}).gh); }
+function mine(t) { const me = lastData && findMe(lastData); return !!(me && assignees(t).includes(me.name)); }
+function myTasksHtml(d) {
+  const me = findMe(d); if (!me) return "";
+  const list = (d.tasks || []).map((t, i) => [t, i]).filter(([t]) => assignees(t).includes(me.name) && !/done/i.test(t.status || ""));
+  if (!list.length) return "";
+  return `<h2>Assigned to you (${list.length})</h2><div class="card">${list.map(([t]) => `<div class="mytask">
+    <div class="head"><div style="font-weight:700">${esc(t.task)}</div>${pill(t.status)}</div>
+    ${whenText(t) ? `<div class="mute small" style="margin-top:2px">${esc(whenText(t))}</div>` : ""}</div>`).join("")}
+    <button class="wide" data-goto="tasks">Open Tasks</button></div>`;
+}
+let inboxEdit = null; // the "at" of the update being edited
+// generic admin editor for Brands, Shoots and Budget
+const REC = {
+  outreach: {title: "brand", tab: "brands", label: "Brand", fields: [
+    ["brand", "Brand", "text", 1], ["contact", "Contact person", "text"], ["status", "Status", ["To contact", "Contacted", "Replied", "In discussion", "Confirmed", "Declined"]],
+    ["contacted", "Date contacted", "date"], ["next", "Next follow-up", "date"], ["notes", "Notes", "area"]]},
+  shoots: {title: "project", tab: "shoots", label: "Shoot", fields: [
+    ["project", "Project", "text", 1], ["date", "Date", "date", 1], ["time", "Time", "time"], ["location", "Location", "text"], ["crew", "Crew", "text"], ["notes", "Notes", "area"]]},
+  budget: {title: "item", tab: "budget", label: "Entry", fields: [
+    ["item", "Item", "text", 1], ["type", "Type", ["Expense", "Income"]], ["amount", "Amount (RM)", "number", 1], ["date", "Date", "date"], ["by", "Handled by", "text"], ["notes", "Notes", "area"]]}
+};
+let recEdit = null; // {col, i, r, before}
+function recEditorHtml() {
+  const c = REC[recEdit.col], r = recEdit.r;
+  return `<h2>${recEdit.i < 0 ? "New " : "Edit "}${c.label.toLowerCase()}</h2>
+    <form class="card ed" id="re-form" autocomplete="off" style="border:0">
+      ${c.fields.map(([k, lab, type, req]) => Array.isArray(type)
+        ? `<label>${lab}<select data-k="${k}">${type.map(o => `<option ${o === (r[k] || type[0]) ? "selected" : ""}>${o}</option>`).join("")}</select></label>`
+        : type === "area" ? `<label>${lab}<textarea data-k="${k}" maxlength="600">${esc(r[k])}</textarea></label>`
+        : `<label>${lab}<input data-k="${k}" type="${type}" value="${esc(r[k])}" ${type === "number" ? 'step="0.01" min="0" inputmode="decimal"' : ""} ${req ? "required" : ""} maxlength="120"></label>`).join("")}
+      <button class="wide primary" type="submit">Save</button>
+      <button class="wide" type="button" data-rec="cancel">Cancel</button>
+      ${recEdit.i >= 0 ? `<button class="rm" type="button" data-rec="delete">Delete</button>` : ""}
+    </form>`;
+}
+function readRecForm() {
+  const r = {};
+  document.querySelectorAll("#re-form [data-k]").forEach(el => { const v = el.value.trim(); if (v) r[el.dataset.k] = el.type === "number" ? Number(v) : v; });
+  return r;
+}
 function rerenderTasks() { $("s-tasks").innerHTML = tasksHtml(lastData); }
-const money = n => "RM " + Number(n || 0).toLocaleString("en-MY", {minimumFractionDigits: 0, maximumFractionDigits: 2});
+const money = n => { const v = Number(n || 0), a = Math.abs(v), dec = Number.isInteger(a) ? 0 : 2;
+  return (v < 0 ? "−" : "") + "RM " + a.toLocaleString("en-MY", {minimumFractionDigits: dec, maximumFractionDigits: dec}); };
 
 function render(d) {
   $("title").textContent = d.title || "Campaign Tracker";
@@ -378,14 +433,20 @@ function render(d) {
       <button class="wide primary" type="submit">Submit</button>`
       : `<div class="note">Team updates are off. Ask an admin to turn them on.</div>`}
     </form>
+    ${myTasksHtml(d)}
     ${(() => {
-      const me = ((profile() || {}).name || "").trim().toLowerCase();
+      const meName = ((profile() || {}).name || "").trim().toLowerCase();
       const admin = isAdmin();
-      const mine = admin ? inbox : inbox.filter(x => (x.by || "").trim().toLowerCase() === me);
-      if (!mine.length) return "";
-      return `<h2>${admin ? "Waiting for review" : "Your updates, waiting to be sorted"} (${mine.length})</h2>
+      const mineOnly = x => (x.by || "").trim().toLowerCase() === meName;
+      const list = admin ? inbox : inbox.filter(mineOnly);
+      if (!list.length) return "";
+      return `<h2>${admin ? "Waiting for review" : "Your updates, waiting to be sorted"} (${list.length})</h2>
     ${admin ? `<button class="wide primary" id="ov-review" style="margin-top:0">Review updates</button>` : ""}
-    <div class="card">${[...mine].reverse().map(x => `<div class="inbox-item"><div class="who2">${esc(x.by || "Someone")} · ${esc(fmtWhen(x.at))}</div><div class="txt">${esc(x.text)}</div></div>`).join("")}</div>`;
+    <div class="card">${[...list].reverse().map(x => `<div class="inbox-item" data-at="${esc(x.at)}"><div class="who2">${esc(x.by || "Someone")} · ${esc(fmtWhen(x.at))}</div>
+      ${inboxEdit === x.at ? `<div class="ed" style="border:0;padding:0;margin:0"><textarea id="ib-text" maxlength="1000">${esc(x.text)}</textarea></div>
+        <div class="mini"><button data-ib="save" style="background:var(--accent);color:#fff">Save</button><button data-ib="cancel">Cancel</button></div>`
+      : `<div class="txt">${esc(x.text)}</div>${mineOnly(x) && canSubmit ? `<div class="mini"><button data-ib="edit">Edit</button><button data-ib="del" style="color:var(--bad)">Delete</button></div>` : ""}`}
+    </div>`).join("")}</div>`;
     })()}
     <div class="stats">
       <div class="stat hot"><b>${open}</b><span>Open tasks</span></div>
@@ -394,7 +455,7 @@ function render(d) {
     </div>
     <h2>Team</h2>
     <div class="card">${(d.team || []).map(m => `
-      <div class="row mid">${m.name ? `<div class="av" aria-hidden="true">${esc(m.name.trim().charAt(0).toUpperCase())}</div>` : '<div class="av none" aria-hidden="true"></div>'}<div class="grow"><div>${m.name ? esc(m.name) + (m.admin ? '<span class="badge">Admin</span>' : "") : '<span class="mute" style="font-weight:400">To be added</span>'}</div>
+      <div class="row mid">${m.name ? `<div class="av" aria-hidden="true">${esc(m.name.trim().charAt(0).toUpperCase())}</div>` : '<div class="av none" aria-hidden="true"></div>'}<div class="grow"><div>${m.name ? '<span class="nm">' + esc(m.name) + '</span>' + (m.admin ? ' <span class="badge" style="display:inline-block;margin-left:0">Admin</span>' : "") : '<span class="mute" style="font-weight:400">To be added</span>'}</div>
       ${m.contact ? `<div class="mute small">${esc(m.contact)}</div>` : ""}${m.notes ? `<div class="mute small">${esc(m.notes)}</div>` : ""}</div>
       <span class="pill ${m.name ? "tint" : ""}">${esc(m.role)}</span></div>`).join("") || '<div class="mute">No team members yet.</div>'}</div>
     <h2>${esc(offer.heading || "What we provide")}</h2>
@@ -405,25 +466,28 @@ function render(d) {
 
   s.tasks = tasksHtml(d);
 
-  s.brands = `<h2>Brand / Client Outreach</h2>` + (out.length ? out.map(b => `
+  const adm = isAdmin();
+  const addBtn = col => adm ? `<button class="wide primary" data-rec="new" data-col="${col}" style="margin-top:0">+ Add</button>` : "";
+  const editBtn = (col, i) => adm ? `<div class="mini" style="margin-top:12px"><button data-rec="${i}" data-col="${col}">Edit</button></div>` : "";
+  s.brands = (recEdit && recEdit.col === "outreach") ? recEditorHtml() : `<h2>Brand / Client Outreach</h2>${addBtn("outreach")}` + (out.length ? out.map((b, i) => `
     <div class="card"><div class="head"><div class="ttl">${esc(b.brand)}</div>${pill(b.status)}</div>
-    ${meta([["Contact", b.contact], ["Contacted", fmtDate(b.contacted)], ["Next follow-up", fmtDate(b.next)]])}${note(b.notes)}</div>`).join("") : empty("No brands contacted yet."));
+    ${meta([["Contact", b.contact], ["Contacted", fmtDate(b.contacted)], ["Next follow-up", fmtDate(b.next)]])}${note(b.notes)}${editBtn("outreach", i)}</div>`).join("") : empty("No brands contacted yet."));
 
-  s.shoots = `<h2>Shoot Schedule</h2>` + (shoots.length ? [...shoots].sort((a, b) => (a.date || "").localeCompare(b.date || "")).map(x => `
-    <div class="card"><div class="kicker">${esc(fmtDate(x.date))}${x.time ? " · " + esc(x.time) : ""}</div>
-    <div class="ttl">${esc(x.project)}</div>${meta([["Location", x.location], ["Crew", x.crew]])}${note(x.notes)}</div>`).join("") : empty("No shoots scheduled yet."));
+  s.shoots = (recEdit && recEdit.col === "shoots") ? recEditorHtml() : `<h2>Shoot Schedule</h2>${addBtn("shoots")}` + (shoots.length ? shoots.map((x, i) => [x, i]).sort((a, b) => (a[0].date || "").localeCompare(b[0].date || "")).map(([x, i]) => `
+    <div class="card"><div class="kicker">${esc(fmtDate(x.date))}${x.time ? " · " + esc(fmtTime(x.time)) : ""}</div>
+    <div class="ttl">${esc(x.project)}</div>${meta([["Location", x.location], ["Crew", x.crew]])}${note(x.notes)}${editBtn("shoots", i)}</div>`).join("") : empty("No shoots scheduled yet."));
 
   const inc = budget.filter(x => /income/i.test(x.type || "")).reduce((a, x) => a + Number(x.amount || 0), 0);
   const exp = budget.filter(x => /expense/i.test(x.type || "")).reduce((a, x) => a + Number(x.amount || 0), 0);
-  s.budget = `<h2>Budget &amp; Cash Flow</h2>
+  s.budget = (recEdit && recEdit.col === "budget") ? recEditorHtml() : `<h2>Budget &amp; Cash Flow</h2>
     <div class="stats money">
       <div class="stat"><b>${money(inc)}</b><span>Income</span></div>
       <div class="stat"><b>${money(exp)}</b><span>Expense</span></div>
       <div class="stat"><b>${money(inc - exp)}</b><span>Balance</span></div>
-    </div>` + (budget.length ? budget.map(x => `
+    </div>${addBtn("budget")}` + (budget.length ? budget.map((x, i) => `
     <div class="card"><div class="head"><div class="ttl">${esc(x.item)}</div>
     <span class="pill ${/income/i.test(x.type || "") ? "good" : "bad"}">${/income/i.test(x.type || "") ? "+" : "−"} ${esc(money(x.amount))}</span></div>
-    ${meta([["Date", fmtDate(x.date)], ["Handled by", x.by]])}${note(x.notes)}</div>`).join("") : empty("No income or expenses recorded yet."));
+    ${meta([["Date", fmtDate(x.date)], ["Handled by", x.by]])}${note(x.notes)}${editBtn("budget", i)}</div>`).join("") : empty("No income or expenses recorded yet."));
 
   s.log = `<h2>Daily Update Log</h2>` + (log.length ? [...log].reverse().map(logCard).join("") : empty("No updates yet."));
 
@@ -722,6 +786,51 @@ function syncReview() {
 function rerenderAdmin() { $("s-admin").innerHTML = adminHtml(lastData); }
 $("main").addEventListener("click", async ev => {
   const b = ev.target.closest("button"); if (!b) return;
+  if (b.dataset.goto) { history.replaceState(null, "", "#" + b.dataset.goto); show(b.dataset.goto); return; }
+  if (b.dataset.tstatus !== undefined) {
+    const i = +b.dataset.tstatus, v = b.dataset.v, key = ((lastData.tasks || [])[i] || {}).task;
+    if (((lastData.tasks || [])[i] || {}).status === v) return;
+    b.closest(".seg").querySelectorAll("button").forEach(x => x.disabled = true);
+    try {
+      const d = await publish(x => { const t = (x.tasks || [])[i]; if (!t || t.task !== key) throw new Error("moved"); t.status = v; }, "Task status: " + key + " → " + v);
+      showApp(d); show("tasks"); toast(v === "Done" ? "Marked Done. No more reminders for this task." : "Status updated.");
+    } catch (e) { toast(e.message === "moved" ? "The task list changed. Tap Refresh and try again." : "Could not save. Try again."); render(lastData); show("tasks"); }
+    return;
+  }
+  if (b.dataset.ib) {
+    const at = b.closest("[data-at]").dataset.at, me = ((profile() || {}).name || "").trim().toLowerCase();
+    const own = y => y.at === at && (y.by || "").trim().toLowerCase() === me;
+    if (b.dataset.ib === "edit") { inboxEdit = at; render(lastData); show("overview"); const t = $("ib-text"); if (t) t.focus(); return; }
+    if (b.dataset.ib === "cancel") { inboxEdit = null; render(lastData); show("overview"); return; }
+    if (b.dataset.ib === "del" && !b.dataset.sure) { b.dataset.sure = "1"; b.textContent = "Tap again to delete"; return; }
+    const text = b.dataset.ib === "save" ? ($("ib-text").value || "").trim() : null;
+    if (b.dataset.ib === "save" && !text) { toast("Write something, or delete the update."); return; }
+    b.disabled = true;
+    try {
+      const d = await publish(x => {
+        const k = (x.inbox || []).findIndex(own); if (k < 0) throw new Error("gone");
+        if (text === null) x.inbox.splice(k, 1); else x.inbox[k].text = text;
+      }, text === null ? "Delete own update" : "Edit own update");
+      inboxEdit = null; showApp(d); show("overview"); toast(text === null ? "Deleted." : "Saved.");
+    } catch (e) { toast(e.message === "gone" ? "Already sorted or removed." : "Could not save. Try again."); inboxEdit = null; render(lastData); show("overview"); }
+    return;
+  }
+  if (b.dataset.rec !== undefined) {
+    const v = b.dataset.rec;
+    if (v === "new") { const col = b.dataset.col; recEdit = {col, i: -1, r: col === "budget" ? {type: "Expense"} : {}}; render(lastData); show(REC[col].tab); window.scrollTo(0, 0); return; }
+    if (v === "cancel") { const tab = REC[recEdit.col].tab; recEdit = null; render(lastData); show(tab); return; }
+    if (v === "delete") {
+      if (!b.dataset.sure) { b.dataset.sure = "1"; b.textContent = "Tap again to delete"; return; }
+      const {col, i, before} = recEdit, tab = REC[col].tab; b.disabled = true;
+      try {
+        const d = await publish(x => { const a = x[col] || []; if (JSON.stringify(a[i]) !== before) throw new Error("moved"); a.splice(i, 1); }, "Delete from " + col);
+        recEdit = null; showApp(d); show(tab); toast("Deleted.");
+      } catch (e) { toast(e.message === "moved" ? "This changed meanwhile. Tap Refresh and try again." : "Could not save. Try again."); b.disabled = false; }
+      return;
+    }
+    const col = b.dataset.col, i = +v, r = (lastData[col] || [])[i]; if (!r) return;
+    recEdit = {col, i, r: JSON.parse(JSON.stringify(r)), before: JSON.stringify(r)}; render(lastData); show(REC[col].tab); window.scrollTo(0, 0); return;
+  }
   if (b.dataset.task !== undefined && b.closest("#s-tasks")) {
     const v = b.dataset.task;
     if (v === "new") { taskEdit = {i: -1, t: {task: "", notes: "", status: "Not started", _mode: "deadline", assignees: []}}; rerenderTasks(); window.scrollTo(0, 0); return; }
@@ -839,6 +948,23 @@ $("main").addEventListener("submit", async ev => {
     toast(calUrl(o, d) ? "Saved. Tap Send calendar invite to add it to everyone's calendar." : "Saved.");
   } catch (e) {
     toast(e.message === "moved" ? "The task list changed. Tap Refresh and try again." : e.message === "notoken" ? "Connect GitHub in Admin first." : "Could not save. Try again.");
+    btn.disabled = false; btn.textContent = "Save";
+  }
+}, true);
+$("main").addEventListener("submit", async ev => {
+  if (ev.target.id !== "re-form") return;
+  ev.preventDefault(); ev.stopImmediatePropagation();
+  const {col, i, before} = recEdit, c = REC[col], r = readRecForm();
+  for (const [k, lab, type, req] of c.fields) if (req && (r[k] === undefined || r[k] === "")) { toast(lab + " is needed."); return; }
+  const btn = ev.target.querySelector("button[type=submit]"); btn.disabled = true; btn.textContent = "Saving…";
+  try {
+    const d = await publish(x => {
+      const a = (x[col] = x[col] || []);
+      if (i < 0) a.push(r); else { if (JSON.stringify(a[i]) !== before) throw new Error("moved"); a[i] = r; }
+    }, (i < 0 ? "Add to " : "Edit ") + col + ": " + (r[c.title] || ""));
+    recEdit = null; showApp(d); show(c.tab); toast("Saved.");
+  } catch (e) {
+    toast(e.message === "moved" ? "This changed meanwhile. Tap Refresh and try again." : e.message === "notoken" ? "Connect GitHub in Admin first." : "Could not save. Try again.");
     btn.disabled = false; btn.textContent = "Save";
   }
 }, true);
