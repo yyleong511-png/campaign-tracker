@@ -1,6 +1,6 @@
 // App shell only. The encrypted data file is never cached, so the team always sees the latest update.
-const CACHE = "ct-shell-v5";
-const SHELL = ["./", "index.html", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/icon-180.png", "icons/icon-32.png"];
+const CACHE = "ct-shell-v6";
+const SHELL = ["./", "index.html", "manifest.webmanifest", "icons/ct-192.png", "icons/ct-512.png", "icons/ct-180.png", "icons/ct-32.png"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
