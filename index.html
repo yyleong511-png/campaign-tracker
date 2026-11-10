@@ -265,6 +265,79 @@ const meta = pairs => {
 };
 const note = t => t ? `<div class="note">${esc(t)}</div>` : "";
 const empty = t => `<div class="empty">${esc(t)}</div>`;
+// ---- Tasks: admin can add/edit tasks with dates + assignees, then send Google Calendar invites ----
+const TASK_STATUS = ["Not started", "In progress", "Done", "Blocked"];
+let taskEdit = null; // {i: index or -1, t: working copy}
+const assignees = t => Array.isArray(t.assignees) ? t.assignees : (t.owner ? [t.owner] : []);
+function whenText(t) {
+  if (t.start && t.end) return fmtDate(t.start) + " – " + fmtDate(t.end);
+  if (t.start) return "Starts " + fmtDate(t.start);
+  if (t.deadline) return "Due " + fmtDate(t.deadline);
+  return "";
+}
+function ymd(s, plusDays) {
+  const d = new Date(s + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + (plusDays || 0));
+  return d.toISOString().slice(0, 10).replace(/-/g, "");
+}
+function calUrl(t, d) {
+  const names = assignees(t);
+  const emails = (d.team || []).filter(m => names.includes(m.name) && m.email).map(m => m.email);
+  let dates, text;
+  if (t.start && t.end) { dates = ymd(t.start) + "/" + ymd(t.end, 1); text = t.task; }
+  else if (t.deadline) { dates = ymd(t.deadline) + "/" + ymd(t.deadline, 1); text = "Deadline: " + t.task; }
+  else return "";
+  const details = [t.notes, names.length ? "Assigned: " + names.join(", ") : "", "Campaign Tracker: " + location.origin + location.pathname].filter(Boolean).join("\n\n");
+  const q = new URLSearchParams({action: "TEMPLATE", text, dates, details, ctz: "Asia/Kuala_Lumpur"});
+  if (emails.length) q.set("add", emails.join(","));
+  return "https://calendar.google.com/calendar/render?" + q.toString();
+}
+function tasksHtml(d) {
+  const tasks = d.tasks || [], admin = isAdmin();
+  if (taskEdit) return taskEditorHtml(d);
+  return `<h2>Tasks &amp; Assignments</h2>
+    ${admin ? `<button class="wide primary" data-task="new" style="margin-top:0">+ Add task</button>` : ""}` +
+    (tasks.length ? tasks.map((t, i) => {
+      const cal = admin ? calUrl(t, d) : "";
+      return `<div class="card"><div class="head"><div class="ttl">${esc(t.task)}</div>${pill(t.status)}</div>
+      ${meta([["Assigned", assignees(t).join(", ")], ["When", whenText(t)]])}${note(t.notes)}
+      ${admin ? `<div style="display:flex;gap:8px;margin-top:12px">
+        <button class="wide" data-task="${i}" style="margin:0;flex:1">Edit</button>
+        ${cal ? `<a class="wide primary" href="${esc(cal)}" target="_blank" rel="noopener" style="margin:0;flex:1.4;text-align:center;text-decoration:none;border-radius:14px;font-weight:600;display:block">Send calendar invite</a>` : ""}
+      </div>` : ""}</div>`;
+    }).join("") : empty("No tasks yet."));
+}
+function taskEditorHtml(d) {
+  const t = taskEdit.t, team = (d.team || []).filter(m => m.name), mode = t._mode;
+  return `<h2>${taskEdit.i < 0 ? "New task" : "Edit task"}</h2>
+    <form class="card ed" id="te-form" autocomplete="off" style="border:0">
+      <label>Task<input id="te-task" value="${esc(t.task)}" maxlength="120" required></label>
+      <label>Notes<input id="te-notes" value="${esc(t.notes)}" maxlength="300"></label>
+      <label>Status<select id="te-status" style="width:100%;font:inherit;font-size:16px;background:var(--bg);border:0;border-radius:14px;padding:12px 14px;margin-top:4px;color:var(--ink)">
+        ${TASK_STATUS.map(x => `<option ${x === (t.status || "Not started") ? "selected" : ""}>${x}</option>`).join("")}</select></label>
+      <div style="font-size:12px;font-weight:600;color:var(--mute);margin-top:14px">Dates</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
+        <button type="button" data-mode="deadline" class="${mode === "deadline" ? "primary" : ""}" style="margin:0;${mode === "deadline" ? "background:var(--accent);color:#fff" : "background:var(--bg)"}">Deadline only</button>
+        <button type="button" data-mode="range" style="margin:0;${mode === "range" ? "background:var(--accent);color:#fff" : "background:var(--bg)"}">Start → End</button>
+      </div>
+      ${mode === "range" ? `<label>Start date<input id="te-start" type="date" value="${esc(t.start)}" required></label>
+        <label>End date<input id="te-end" type="date" value="${esc(t.end)}" required></label>`
+      : `<label>Deadline<input id="te-deadline" type="date" value="${esc(t.deadline)}"></label>`}
+      <div style="font-size:12px;font-weight:600;color:var(--mute);margin-top:14px">Assign to</div>
+      ${team.map(m => `<label class="chk"><input type="checkbox" data-as="${esc(m.name)}" ${assignees(t).includes(m.name) ? "checked" : ""}>
+        <span>${esc(m.name)} <span class="mute small">· ${esc(m.role)}${m.email ? "" : " · no email"}</span></span></label>`).join("")}
+      <button class="wide primary" type="submit">Save</button>
+      <button class="wide" type="button" data-task="cancel">Cancel</button>
+      ${taskEdit.i >= 0 ? `<button class="rm" type="button" data-task="delete">Delete task</button>` : ""}
+    </form>`;
+}
+function readTaskForm() {
+  const t = taskEdit.t;
+  t.task = $("te-task").value.trim(); t.notes = $("te-notes").value.trim(); t.status = $("te-status").value;
+  if (t._mode === "range") { t.start = $("te-start").value; t.end = $("te-end").value; }
+  else if ($("te-deadline")) t.deadline = $("te-deadline").value;
+  t.assignees = [...document.querySelectorAll("#te-form [data-as]")].filter(x => x.checked).map(x => x.dataset.as);
+}
+function rerenderTasks() { $("s-tasks").innerHTML = tasksHtml(lastData); }
 const money = n => "RM " + Number(n || 0).toLocaleString("en-MY", {minimumFractionDigits: 0, maximumFractionDigits: 2});
 
 function render(d) {
@@ -312,9 +385,7 @@ function render(d) {
       ${offer.duration ? `<div class="row mid"><div class="k small">Estimated duration</div><span class="pill tint">${esc(offer.duration)}</span></div>` : ""}</div>
     ${log.length ? `<h2>Latest update</h2>${logCard(log[log.length - 1])}` : ""}`;
 
-  s.tasks = `<h2>Tasks &amp; Assignments</h2>` + (tasks.length ? tasks.map(t => `
-    <div class="card"><div class="head"><div class="ttl">${esc(t.task)}</div>${pill(t.status)}</div>
-    ${meta([["Owner", t.owner], ["Deadline", fmtDate(t.deadline)]])}${note(t.notes)}</div>`).join("") : empty("No tasks yet."));
+  s.tasks = tasksHtml(d);
 
   s.brands = `<h2>Brand / Client Outreach</h2>` + (out.length ? out.map(b => `
     <div class="card"><div class="head"><div class="ttl">${esc(b.brand)}</div>${pill(b.status)}</div>
@@ -633,6 +704,24 @@ function syncReview() {
 function rerenderAdmin() { $("s-admin").innerHTML = adminHtml(lastData); }
 $("main").addEventListener("click", async ev => {
   const b = ev.target.closest("button"); if (!b) return;
+  if (b.dataset.task !== undefined && b.closest("#s-tasks")) {
+    const v = b.dataset.task;
+    if (v === "new") { taskEdit = {i: -1, t: {task: "", notes: "", status: "Not started", _mode: "deadline", assignees: []}}; rerenderTasks(); window.scrollTo(0, 0); return; }
+    if (v === "cancel") { taskEdit = null; rerenderTasks(); return; }
+    if (v === "delete") {
+      if (!b.dataset.sure) { b.dataset.sure = "1"; b.textContent = "Tap again to delete"; return; }
+      const i = taskEdit.i, key = taskEdit.t.task; b.disabled = true;
+      try {
+        const d = await publish(x => { const k = (x.tasks || []).findIndex((y, j) => j === i && y.task === key); if (k < 0) throw new Error("moved"); x.tasks.splice(k, 1); }, "Delete a task");
+        taskEdit = null; showApp(d); show("tasks"); toast("Task deleted.");
+      } catch (e) { toast(e.message === "moved" ? "The task list changed. Tap Refresh and try again." : "Could not save. Try again."); b.disabled = false; }
+      return;
+    }
+    const t = (lastData.tasks || [])[+v]; if (!t) return;
+    const c = JSON.parse(JSON.stringify(t)); c.assignees = assignees(t); delete c.owner; c._mode = c.start ? "range" : "deadline";
+    taskEdit = {i: +v, t: c}; rerenderTasks(); window.scrollTo(0, 0); return;
+  }
+  if (b.dataset.mode && b.closest("#te-form")) { readTaskForm(); taskEdit.t._mode = b.dataset.mode; rerenderTasks(); return; }
   if (b.id === "ov-review") { draft = null; reviewSel = null; rerenderAdmin(); history.replaceState(null, "", "#admin"); show("admin"); return; }
   if (b.id === "pf-admin") { draft = null; reviewSel = null; rerenderAdmin(); history.replaceState(null, "", "#admin"); show("admin"); return; }
   const act = b.dataset.act; if (!act || !b.closest("#s-admin")) return;
@@ -708,6 +797,30 @@ $("main").addEventListener("submit", async ev => {
   } catch (e) {
     toast(e.message === "auth" ? "Updates are not working right now. Tell an admin." : "Could not send. Check your connection and try again.");
     btn.disabled = false; btn.textContent = "Submit";
+  }
+}, true);
+$("main").addEventListener("submit", async ev => {
+  if (ev.target.id !== "te-form") return;
+  ev.preventDefault(); ev.stopImmediatePropagation();
+  readTaskForm();
+  const t = taskEdit.t;
+  if (!t.task) { toast("Give the task a name."); return; }
+  if (t._mode === "range" && t.end < t.start) { toast("End date is before the start date."); return; }
+  const o = {task: t.task, notes: t.notes, status: t.status, assignees: t.assignees};
+  if (t._mode === "range") { o.start = t.start; o.end = t.end; } else if (t.deadline) o.deadline = t.deadline;
+  const i = taskEdit.i, before = i >= 0 ? (lastData.tasks || [])[i].task : null;
+  const btn = ev.target.querySelector("button[type=submit]"); btn.disabled = true; btn.textContent = "Saving…";
+  try {
+    const d = await publish(x => {
+      x.tasks = x.tasks || [];
+      if (i < 0) x.tasks.push(o);
+      else { if (!x.tasks[i] || x.tasks[i].task !== before) throw new Error("moved"); x.tasks[i] = o; }
+    }, (i < 0 ? "Add task: " : "Edit task: ") + o.task);
+    taskEdit = null; showApp(d); show("tasks");
+    toast(calUrl(o, d) ? "Saved. Tap Send calendar invite to add it to everyone's calendar." : "Saved.");
+  } catch (e) {
+    toast(e.message === "moved" ? "The task list changed. Tap Refresh and try again." : e.message === "notoken" ? "Connect GitHub in Admin first." : "Could not save. Try again.");
+    btn.disabled = false; btn.textContent = "Save";
   }
 }, true);
 function profileHtml(d) {
