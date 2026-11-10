@@ -128,6 +128,8 @@ header.top #updated,header.top #who{font-size:12px;white-space:nowrap;overflow:h
 #lock button{width:100%;background:var(--accent);color:#fff;padding:14px;font-weight:700}
 #lock #li-bio{margin-top:18px}
 #lock .or{text-align:center;margin:14px 0 -6px}
+#role-btns button[aria-pressed="true"]{background:#231C7A;color:var(--pop);box-shadow:0 0 0 3px var(--pop) inset}
+#role-btns.picking button[aria-pressed="false"]{opacity:.45}
 #lock .err{color:var(--bad);min-height:1.5em;font-size:13px;margin-top:10px}
 </style>
 </head>
@@ -163,6 +165,12 @@ header.top #updated,header.top #who{font-size:12px;white-space:nowrap;overflow:h
     <h1>Which one are you?</h1>
     <p class="mute small">Tap your role so the tracker knows it's you.</p>
     <div id="role-btns"></div>
+    <div id="role-confirm" hidden style="background:var(--panel);border-radius:20px;padding:18px;margin-top:14px">
+      <div style="font-weight:700;font-size:16px" id="role-q"></div>
+      <div class="mute small" style="margin-top:2px">Check it's really you before you continue.</div>
+      <button type="button" id="role-yes" style="margin-top:14px">Yes, that's me</button>
+      <button type="button" id="role-no" style="margin-top:10px;background:var(--bg);color:var(--ink)">No, go back</button>
+    </div>
     <button type="button" id="role-skip" style="background:none;color:var(--mute);font-weight:600;margin-top:6px">Skip for now</button>
     <div class="err" role="alert"></div>
   </form>
@@ -448,20 +456,42 @@ $("f-login").addEventListener("submit", async ev => {
 // role picker: links this phone's login to a team member (no save needed), or fills an open slot
 function roleLabel(r) { return r ? (/^[aeiou]/i.test(r) ? "I am an " : "I am the ") + r : "That's me"; }
 function showRolePick(d) {
-  $("role-btns").innerHTML = (d.team || []).map((m, i) => m.admin ? "" : `<button type="button" data-pick="${i}" style="margin-top:10px;display:block">
+  $("role-btns").innerHTML = (d.team || []).map((m, i) => m.admin ? "" : `<button type="button" data-pick="${i}" aria-pressed="false" style="margin-top:10px;display:block">
     ${esc(roleLabel(m.role))}${m.name ? `<span style="display:block;font-weight:500;font-size:13px;opacity:.85">${esc(m.name)}</span>` : ""}</button>`).join("");
-  showLock("f-role");
+  showLock("f-role"); rolePick(null);
 }
-$("role-btns").addEventListener("click", async ev => {
+let rolePicked = null;
+function rolePick(i) {
+  rolePicked = i;
+  const box = $("role-btns");
+  box.classList.toggle("picking", i !== null);
+  box.querySelectorAll("[data-pick]").forEach(x => x.setAttribute("aria-pressed", String(+x.dataset.pick === i)));
+  $("role-confirm").hidden = i === null; $("role-skip").hidden = i !== null;
+  $("f-role").querySelector(".err").textContent = "";
+  if (i !== null) {
+    const m = (lastData.team || [])[i];
+    $("role-q").textContent = "You're the " + (m.role || "team member") + (m.name ? " (" + m.name + ")" : "") + "?";
+    $("role-confirm").scrollIntoView({behavior: "smooth", block: "nearest"});
+  }
+}
+$("role-btns").addEventListener("click", ev => {
   const b = ev.target.closest("[data-pick]"); if (!b) return;
-  const d = lastData, m = (d.team || [])[+b.dataset.pick]; if (!m) return;
+  rolePick(+b.dataset.pick === rolePicked ? null : +b.dataset.pick);
+});
+$("role-no").addEventListener("click", () => rolePick(null));
+$("role-yes").addEventListener("click", async () => {
+  if (rolePicked === null) return;
+  const b = $("role-yes");
+  const d = lastData, m = (d.team || [])[rolePicked]; if (!m) return;
   const p = profile(); const err = $("f-role").querySelector(".err");
   if (m.name) { p.member = m.name; sset(PROFILE, JSON.stringify(p)); showApp(d); toast("Welcome, " + m.name + "!"); return; }
   b.disabled = true;
+  const idx = rolePicked;
   try {
-    const nd = await publish(x => { const s = (x.team || [])[+b.dataset.pick]; if (!s || s.name) throw new Error("taken"); s.name = p.name; }, p.name + " joined the team list");
+    const nd = await publish(x => { const s = (x.team || [])[idx]; if (!s || s.name) throw new Error("taken"); s.name = p.name; }, p.name + " joined the team list");
     p.member = p.name; sset(PROFILE, JSON.stringify(p)); showApp(nd); toast("You're on the team list.");
-  } catch (e) { err.textContent = e.message === "taken" ? "Someone already took that role." : e.message === "notoken" ? "Ask an admin to add you, then pick again from your Profile." : "Could not save. Try again."; b.disabled = false; }
+  } catch (e) { err.textContent = e.message === "taken" ? "Someone already took that role." : e.message === "notoken" ? "Ask an admin to add you, then pick again from your Profile." : "Could not save. Try again."; }
+  finally { b.disabled = false; }
 });
 $("role-skip").addEventListener("click", () => showApp(lastData));
 $("li-reset").addEventListener("click", ev => { ev.preventDefault(); sdel(PROFILE); rawKey = null; showLock("f-team"); });
