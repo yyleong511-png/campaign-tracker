@@ -156,6 +156,16 @@ header.top #updated,header.top #who{font-size:12px;white-space:nowrap;overflow:h
     <button type="submit">Save and open</button>
     <div class="err" role="alert"></div>
   </form>
+  <!-- Step 3: which team member are you -->
+  <form id="f-role" autocomplete="off" hidden>
+    <div class="logo lg" aria-hidden="true"><span>CT</span></div>
+    <div class="kicker">Last step</div>
+    <h1>Which one are you?</h1>
+    <p class="mute small">Tap your role so the tracker knows it's you.</p>
+    <div id="role-btns"></div>
+    <button type="button" id="role-skip" style="background:none;color:var(--mute);font-weight:600;margin-top:6px">Skip for now</button>
+    <div class="err" role="alert"></div>
+  </form>
   <!-- Returning: personal password -->
   <form id="f-login" autocomplete="off" hidden>
     <div class="logo lg" aria-hidden="true"><span>CT</span></div>
@@ -349,7 +359,7 @@ async function pinKey(pw, salt) {
 }
 function showLock(form, msg) {
   $("app").hidden = true; $("nav").hidden = true; $("lock").hidden = false;
-  ["f-team", "f-setup", "f-login"].forEach(f => { $(f).hidden = f !== form; $(f).querySelector(".err").textContent = ""; });
+  ["f-team", "f-setup", "f-role", "f-login"].forEach(f => { $(f).hidden = f !== form; $(f).querySelector(".err").textContent = ""; });
   if (msg) $(form).querySelector(".err").textContent = msg;
   const first = $(form).querySelector("input"); if (first) first.focus({preventScroll: true});
 }
@@ -411,7 +421,10 @@ $("f-setup").addEventListener("submit", async ev => {
     sset(PROFILE, JSON.stringify({name, salt: b64(salt), iv: b64(iv), key: b64(wrapped)}));
     rawKey = pendingKey; pendingKey = null;
     $("su-pw").value = $("su-pw2").value = "";
-    showApp(await decrypt(rawKey, await fetchEnc()));
+    const d = await decrypt(rawKey, await fetchEnc());
+    lastData = d;
+    if (!findMe(d) && (d.team || []).length) { showRolePick(d); return; }
+    showApp(d);
   } catch (e) { err.textContent = NET_ERR; } finally { busy(f, false); }
 });
 
@@ -432,6 +445,25 @@ $("f-login").addEventListener("submit", async ev => {
   } finally { busy(f, false); }
 });
 
+// role picker: links this phone's login to a team member (no save needed), or fills an open slot
+function roleLabel(r) { return r ? (/^[aeiou]/i.test(r) ? "I am an " : "I am the ") + r : "That's me"; }
+function showRolePick(d) {
+  $("role-btns").innerHTML = (d.team || []).map((m, i) => m.admin ? "" : `<button type="button" data-pick="${i}" style="margin-top:10px;display:block">
+    ${esc(roleLabel(m.role))}${m.name ? `<span style="display:block;font-weight:500;font-size:13px;opacity:.85">${esc(m.name)}</span>` : ""}</button>`).join("");
+  showLock("f-role");
+}
+$("role-btns").addEventListener("click", async ev => {
+  const b = ev.target.closest("[data-pick]"); if (!b) return;
+  const d = lastData, m = (d.team || [])[+b.dataset.pick]; if (!m) return;
+  const p = profile(); const err = $("f-role").querySelector(".err");
+  if (m.name) { p.member = m.name; sset(PROFILE, JSON.stringify(p)); showApp(d); toast("Welcome, " + m.name + "!"); return; }
+  b.disabled = true;
+  try {
+    const nd = await publish(x => { const s = (x.team || [])[+b.dataset.pick]; if (!s || s.name) throw new Error("taken"); s.name = p.name; }, p.name + " joined the team list");
+    p.member = p.name; sset(PROFILE, JSON.stringify(p)); showApp(nd); toast("You're on the team list.");
+  } catch (e) { err.textContent = e.message === "taken" ? "Someone already took that role." : e.message === "notoken" ? "Ask an admin to add you, then pick again from your Profile." : "Could not save. Try again."; b.disabled = false; }
+});
+$("role-skip").addEventListener("click", () => showApp(lastData));
 $("li-reset").addEventListener("click", ev => { ev.preventDefault(); sdel(PROFILE); rawKey = null; showLock("f-team"); });
 
 $("nav").querySelector(".in").innerHTML = TABS.map(([id, label]) => `<button data-tab="${id}">${label}</button>`).join("");
@@ -464,6 +496,7 @@ let draft = null; // working copy of the team list while editing
 let reviewSel = null, reviewKnown = null; // which inbox items are ticked for Claude
 function findMe(d) {
   const p = profile(); if (!p || !p.name) return null;
+  if (p.member) { const m = (d.team || []).find(m => m.name === p.member); if (m) return m; }
   const n = p.name.trim().toLowerCase();
   return (d.team || []).find(m => m.name && (m.name.toLowerCase() === n || m.name.toLowerCase().startsWith(n + " "))) || null;
 }
@@ -655,11 +688,10 @@ function profileHtml(d) {
     <div class="card">
       <div class="row"><div class="k">Name</div><div class="v">${esc(p.name)}</div></div>
       <div class="row"><div class="k">Role</div><div class="v">${me ? esc(me.role) : '<span class="mute">Not on the team list yet</span>'}</div></div>
-      ${!me && (d.team || []).some(m => !m.name) ? `<div class="row" style="display:block">
-        <div style="font-weight:700">Which role are you?</div>
-        <div class="mute small" style="margin-top:2px">Tap yours to add your name to the team list.</div>
-        ${(d.submitToken || p.gh) ? (d.team || []).map((m, i) => m.name ? "" : `<button class="wide" data-claim="${i}">I'm the ${esc(m.role || "team member")}</button>`).join("")
-          : `<div class="note">Team updates are off. Ask an admin to add you.</div>`}
+      ${!me && (d.team || []).length ? `<div class="row" style="display:block">
+        <div style="font-weight:700">Which one are you?</div>
+        <div class="mute small" style="margin-top:2px">Link your login to your role on the team list.</div>
+        <button class="wide primary" id="pf-pick">Choose my role</button>
       </div>` : ""}
       <div class="row"><div class="k">Access</div><div class="v">${me && me.admin ? "Admin" : "Member"}</div></div>
       <div class="row"><div class="k">Unlock with</div><div class="v">Personal password${p.bio ? "<br>Face ID / fingerprint" : ""}</div></div>
@@ -733,6 +765,7 @@ async function bioEnable() {
 }
 $("main").addEventListener("click", async ev => {
   const b = ev.target.closest("button"); if (!b) return;
+  if (b.id === "pf-pick") { showRolePick(lastData); return; }
   if (b.dataset.claim !== undefined) {
     const i = +b.dataset.claim, name = ((profile() || {}).name || "").trim(); if (!name) return;
     b.disabled = true;
