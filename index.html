@@ -110,6 +110,13 @@ header.top .who>div:last-child{min-width:0}
 header.top h1{font-size:19px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 header.top #updated,header.top #who{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .logo{font-family:var(--font)}
+.compose textarea{width:100%;font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid transparent;
+  border-radius:14px;padding:12px 14px;margin-top:10px;min-height:96px;resize:vertical}
+.compose textarea:focus{outline:2px solid var(--accent);outline-offset:1px}
+.inbox-item{padding:11px 0;border-top:1px solid var(--line)}
+.inbox-item:first-child{border-top:0;padding-top:2px}
+.inbox-item .who2{font-size:12px;font-weight:700;color:var(--tintink)}
+.inbox-item .txt{white-space:pre-wrap;margin-top:2px}
 /* lock screen */
 #lock{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
   margin-bottom:calc(-96px - env(safe-area-inset-bottom))}
@@ -221,6 +228,10 @@ function fmtDate(s) {
   const d = new Date(s + "T00:00:00");
   return d.toLocaleDateString("en-GB", {weekday: "short", day: "numeric", month: "short", year: "numeric"});
 }
+function fmtWhen(iso) {
+  const d = new Date(iso); if (isNaN(d)) return "";
+  return d.toLocaleString("en-GB", {day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true});
+}
 function pill(status) {
   if (!status) return "";
   const s = status.toLowerCase();
@@ -248,7 +259,18 @@ function render(d) {
   const s = {};
 
   const offer = d.offer || {};
+  const inbox = d.inbox || [];
+  const canSubmit = !!(d.submitToken || (profile() || {}).gh);
   s.overview = `
+    <form class="card compose" id="cp-form" autocomplete="off">
+      <div style="font-weight:700;font-size:16px">What are you working on?</div>
+      <div class="mute small" style="margin-top:2px">Brands, shoots, tasks, money in or out. It gets sorted into the tracker.</div>
+      ${canSubmit ? `<textarea id="cp-text" maxlength="1000" placeholder="e.g. Called Elegantee, meeting Sat 15 Nov 2pm at their Bangsar shop" required></textarea>
+      <button class="wide primary" type="submit">Submit</button>`
+      : `<div class="note">Team updates are off. Ask an admin to turn them on.</div>`}
+    </form>
+    ${inbox.length ? `<h2>Waiting to be sorted (${inbox.length})</h2>
+    <div class="card">${[...inbox].reverse().map(x => `<div class="inbox-item"><div class="who2">${esc(x.by || "Someone")} · ${esc(fmtWhen(x.at))}</div><div class="txt">${esc(x.text)}</div></div>`).join("")}</div>` : ""}
     <div class="stats">
       <div class="stat hot"><b>${open}</b><span>Open tasks</span></div>
       <div class="stat"><b>${out.length}</b><span>Brands</span></div>
@@ -440,7 +462,8 @@ function findMe(d) {
 function isAdmin() { const me = lastData && findMe(lastData); return !!(me && me.admin); }
 async function teamKey(usage) { return crypto.subtle.importKey("raw", rawKey, "AES-GCM", false, usage); }
 async function getToken() {
-  const p = profile(); if (!p || !p.gh || !rawKey) return null;
+  const p = profile(); if (!rawKey) return null;
+  if (!p || !p.gh) return (lastData && lastData.submitToken) || null;
   try { return new TextDecoder().decode(await crypto.subtle.decrypt({name: "AES-GCM", iv: unb64(p.gh.iv)}, await teamKey(["decrypt"]), unb64(p.gh.ct))); }
   catch (e) { return null; }
 }
@@ -461,6 +484,10 @@ async function gh(tok, method, body) {
   return r.json();
 }
 async function publish(mutate, message) {
+  try { return await publishOnce(mutate, message); }
+  catch (e) { if (e.message !== "conflict") throw e; return publishOnce(mutate, message); }
+}
+async function publishOnce(mutate, message) {
   const tok = await getToken(); if (!tok) throw new Error("notoken");
   const file = await gh(tok, "GET");
   const enc = JSON.parse(atob(file.content.replace(/\s/g, "")));
@@ -484,6 +511,11 @@ function adminHtml(d) {
       <input id="ad-tok" type="password" placeholder="github_pat_…" autocapitalize="off" autocorrect="off" spellcheck="false" required>
       <button class="wide primary" type="submit">Connect</button>
     </form>`}
+    ${hasTok ? `<div class="card">
+      <div style="font-weight:700">Team updates</div>
+      <div class="mute small" style="margin-top:4px">${d.submitToken ? "On. Everyone can use the box on Overview." : "Off. Turn on to let everyone use the box on Overview. Your GitHub token is stored inside the encrypted tracker, so anyone with the team password can use it."}</div>
+      <button class="wide ${d.submitToken ? "" : "primary"}" data-act="${d.submitToken ? "subOff" : "subOn"}">${d.submitToken ? "Turn off" : "Turn on"}</button>
+    </div>` : ""}
     <div class="card" id="ad-list">${draft.map((m, i) => `
       <div class="ed" data-i="${i}">
         <label>Name<input data-f="name" value="${esc(m.name)}" placeholder="Full name" maxlength="40"></label>
@@ -514,6 +546,15 @@ $("main").addEventListener("click", async ev => {
   if (act === "add") { draft.push({name: "", role: "", contact: "", notes: ""}); rerenderAdmin(); const all = document.querySelectorAll("#ad-list .ed"); all[all.length - 1].querySelector("input").focus(); }
   else if (act === "rm") { draft.splice(+b.closest(".ed").dataset.i, 1); rerenderAdmin(); }
   else if (act === "back") { draft = null; history.replaceState(null, "", "#profile"); show("profile"); }
+  else if (act === "subOn" || act === "subOff") {
+    b.disabled = true;
+    try {
+      const tok = act === "subOn" ? await getToken() : null;
+      const d = await publish(x => { if (tok) x.submitToken = tok; else delete x.submitToken; }, act === "subOn" ? "Turn on team updates" : "Turn off team updates");
+      draft = null; showApp(d); history.replaceState(null, "", "#admin"); show("admin");
+      toast(act === "subOn" ? "Team updates are on." : "Team updates are off.");
+    } catch (e) { toast("Could not save. Try again."); b.disabled = false; }
+  }
   else if (act === "untok") { const p = profile(); delete p.gh; sset(PROFILE, JSON.stringify(p)); rerenderAdmin(); toast("GitHub disconnected on this phone."); }
   else if (act === "save") {
     const team = draft.filter(m => m.name || m.role).map(m => { const o = {name: m.name || "", role: m.role || "", contact: m.contact || "", notes: m.notes || ""}; if (m.admin) o.admin = true; return o; });
@@ -542,6 +583,20 @@ $("main").addEventListener("submit", async ev => {
   } catch (e) {
     toast(e.message === "auth" ? "That token can't access the repo. Check its permissions." : "Could not reach GitHub. Try again.");
     btn.disabled = false; btn.textContent = "Connect";
+  }
+}, true);
+$("main").addEventListener("submit", async ev => {
+  if (ev.target.id !== "cp-form") return;
+  ev.preventDefault(); ev.stopImmediatePropagation();
+  const text = $("cp-text").value.trim(); if (!text) return;
+  const btn = ev.target.querySelector("button"); btn.disabled = true; btn.textContent = "Sending…";
+  const by = (profile() || {}).name || "";
+  try {
+    const d = await publish(x => { (x.inbox = x.inbox || []).push({by, at: new Date().toISOString(), text}); }, "New update from " + (by || "team"));
+    showApp(d); toast("Sent. It will be sorted into the tracker.");
+  } catch (e) {
+    toast(e.message === "auth" ? "Updates are not working right now. Tell an admin." : "Could not send. Check your connection and try again.");
+    btn.disabled = false; btn.textContent = "Submit";
   }
 }, true);
 function profileHtml(d) {
