@@ -12,7 +12,8 @@
 <title>Campaign Tracker</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
-<link rel="icon" href="icons/icon-192.png">
+<link rel="icon" href="icons/icon-32.png" sizes="32x32">
+<link rel="icon" href="icons/icon-192.png" sizes="192x192">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -36,12 +37,12 @@ h2{font-size:17px;margin:22px 4px 8px}
 .mute{color:var(--mute)}
 .small{font-size:13px}
 header.top{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:0 4px 6px}
-header.top .acts{display:flex;gap:8px;align-items:center;flex:none}
+header.top .acts{display:flex;gap:6px;align-items:center;flex:none}
 button{font:inherit;font-weight:600;color:inherit;background:var(--panel);border:0;border-radius:14px;
   padding:10px 14px;cursor:pointer}
 button:active{opacity:.8}
 button:disabled{opacity:.6}
-#refresh{font-size:13px;color:var(--mute);min-height:44px}
+#refresh{width:44px;height:44px;padding:0;border-radius:50%;color:var(--mute);display:flex;align-items:center;justify-content:center}
 #profbtn{width:48px;height:48px;border-radius:50%;background:var(--accent);color:#fff;font-size:18px;font-weight:700;padding:0}
 .card{background:var(--panel);border-radius:20px;padding:16px;margin:10px 0}
 .card .head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
@@ -95,6 +96,20 @@ nav button[aria-current="true"]{background:var(--tint);color:var(--tintink);font
 .ed .chk input{width:22px;height:22px;margin:0;accent-color:var(--accent)}
 .ed .rm{background:var(--badbg);color:var(--bad);margin-top:8px;width:100%}
 .badge{font-size:11px;font-weight:700;background:var(--pop);color:var(--ink);border-radius:6px;padding:2px 6px;margin-left:6px;vertical-align:2px}
+.logo{width:52px;height:52px;border-radius:15px;background:var(--accent);color:#fff;font-weight:800;font-size:20px;
+  display:flex;align-items:center;justify-content:center;position:relative;flex:none;letter-spacing:-.01em}
+.logo span{transform:translateY(-2px)}
+.logo:after{content:"";position:absolute;left:16px;right:16px;bottom:9px;height:4px;border-radius:2px;background:var(--pop)}
+.logo.lg{width:72px;height:72px;border-radius:21px;font-size:28px;margin-bottom:22px}
+.logo.lg:after{left:22px;right:22px;bottom:12px;height:5px}
+header.top .who{display:flex;align-items:center;gap:12px;min-width:0}
+header.top .logo{width:46px;height:46px;border-radius:14px;font-size:18px}
+header.top .logo:after{left:14px;right:14px;bottom:8px}
+@media (max-width:380px){header.top h1{white-space:normal}}
+header.top .who>div:last-child{min-width:0}
+header.top h1{font-size:19px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+header.top #updated,header.top #who{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.logo{font-family:var(--font)}
 /* lock screen */
 #lock{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
   margin-bottom:calc(-96px - env(safe-area-inset-bottom))}
@@ -114,6 +129,7 @@ nav button[aria-current="true"]{background:var(--tint);color:var(--tintink);font
 <div id="lock" hidden>
   <!-- Step 1: shared team password (first time on this phone) -->
   <form id="f-team" autocomplete="off" hidden>
+    <div class="logo lg" aria-hidden="true"><span>CT</span></div>
     <div class="kicker">Step 1 of 2 · Team only</div>
     <h1>Campaign Tracker</h1>
     <p class="mute small">Enter the shared team password.</p>
@@ -123,6 +139,7 @@ nav button[aria-current="true"]{background:var(--tint);color:var(--tintink);font
   </form>
   <!-- Step 2: choose your name and set a personal password -->
   <form id="f-setup" autocomplete="off" hidden>
+    <div class="logo lg" aria-hidden="true"><span>CT</span></div>
     <div class="kicker">Step 2 of 2 · Your login</div>
     <h1>Set your password</h1>
     <p class="mute small">Choose a personal password for this phone. You will enter it every time you open the tracker.</p>
@@ -134,6 +151,7 @@ nav button[aria-current="true"]{background:var(--tint);color:var(--tintink);font
   </form>
   <!-- Returning: personal password -->
   <form id="f-login" autocomplete="off" hidden>
+    <div class="logo lg" aria-hidden="true"><span>CT</span></div>
     <div class="kicker">Team only</div>
     <h1 id="li-hello">Welcome back</h1>
     <div id="li-biowrap" hidden>
@@ -150,13 +168,16 @@ nav button[aria-current="true"]{background:var(--tint);color:var(--tintink);font
 
 <div id="app" class="wrap" hidden>
   <header class="top">
-    <div>
-      <div class="mute small" id="who"></div>
-      <h1 id="title">Campaign Tracker</h1>
-      <div class="mute small" id="updated"></div>
+    <div class="who">
+      <div class="logo" aria-hidden="true"><span>CT</span></div>
+      <div>
+        <div class="mute small" id="who"></div>
+        <h1 id="title">Campaign Tracker</h1>
+        <div class="mute small" id="updated"></div>
+      </div>
     </div>
     <div class="acts">
-      <button id="refresh">Refresh</button>
+      <button id="refresh" aria-label="Refresh"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
       <button id="profbtn" aria-label="Open profile">·</button>
     </div>
   </header>
@@ -219,7 +240,7 @@ const money = n => "RM " + Number(n || 0).toLocaleString("en-MY", {minimumFracti
 
 function render(d) {
   $("title").textContent = d.title || "Campaign Tracker";
-  $("updated").textContent = d.updated ? "Last updated " + fmtDate(d.updated) : "";
+  $("updated").textContent = d.updated ? "Updated " + fmtDate(d.updated) : "";
   const tasks = d.tasks || [], out = d.outreach || [], shoots = d.shoots || [], budget = d.budget || [], log = d.log || [];
   const open = tasks.filter(t => !/done|complete/i.test(t.status || "")).length;
   const today = new Date().toISOString().slice(0, 10);
@@ -390,8 +411,8 @@ $("nav").addEventListener("click", ev => {
   history.replaceState(null, "", "#" + b.dataset.tab); show(b.dataset.tab);
 });
 $("refresh").addEventListener("click", async () => {
-  const b = $("refresh"); b.disabled = true; b.textContent = "…";
-  await load(); b.disabled = false; b.textContent = "Refresh";
+  const b = $("refresh"); b.disabled = true;
+  await load(); b.disabled = false; toast("Up to date.");
 });
 $("profbtn").addEventListener("click", () => { history.replaceState(null, "", "#profile"); show("profile"); });
 
