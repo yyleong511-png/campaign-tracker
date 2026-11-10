@@ -66,6 +66,13 @@ nav button{flex:1;border:0;border-radius:0;padding:14px 2px 12px;font-size:11px;
   color:var(--mute);border-top:2px solid transparent}
 nav button[aria-current="true"]{color:var(--ink);border-top-color:var(--accent)}
 [hidden]{display:none !important}
+.card input{width:100%;font:inherit;font-size:16px;color:var(--ink);background:var(--bg);
+  border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-top:10px}
+.card input:focus{outline:2px solid var(--accent);outline-offset:1px}
+.wide{width:100%;margin-top:10px;padding:11px}
+.wide.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+#toast{position:fixed;left:16px;right:16px;bottom:calc(84px + env(safe-area-inset-bottom));max-width:688px;margin:0 auto;
+  background:var(--ink);color:var(--bg);border-radius:10px;padding:11px 14px;font-size:13px;text-align:center;z-index:5}
 /* lock screen */
 #lock{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
   margin-bottom:calc(-72px - env(safe-area-inset-bottom))}
@@ -74,6 +81,8 @@ nav button[aria-current="true"]{color:var(--ink);border-top-color:var(--accent)}
   border:1px solid var(--line);border-radius:10px;padding:13px 14px;margin:18px 0 10px}
 #lock input:focus{outline:2px solid var(--accent);outline-offset:1px}
 #lock button{width:100%;background:var(--accent);border-color:var(--accent);color:#fff;padding:13px;font-weight:600}
+#lock #li-bio{margin-top:18px}
+#lock .or{text-align:center;margin:14px 0 -6px}
 #lock .err{color:var(--accent);min-height:1.5em;font-size:13px;margin-top:10px}
 </style>
 </head>
@@ -104,6 +113,10 @@ nav button[aria-current="true"]{color:var(--ink);border-top-color:var(--accent)}
   <form id="f-login" autocomplete="off" hidden>
     <div class="kicker">Team only</div>
     <h1 id="li-hello">Welcome back</h1>
+    <div id="li-biowrap" hidden>
+      <button type="button" id="li-bio">Unlock with Face ID / fingerprint</button>
+      <p class="mute small or">or</p>
+    </div>
     <p class="mute small">Enter your personal password.</p>
     <input id="li-pw" type="password" placeholder="Personal password" autocapitalize="off" autocorrect="off" spellcheck="false" required>
     <button type="submit">Unlock</button>
@@ -122,13 +135,14 @@ nav button[aria-current="true"]{color:var(--ink);border-top-color:var(--accent)}
     </div>
     <div style="display:flex;gap:8px">
       <button id="refresh">Refresh</button>
-      <button id="lockbtn">Lock</button>
+      <button id="profbtn">Profile</button>
     </div>
   </header>
   <main id="main"></main>
 </div>
 
 <nav id="nav" hidden><div class="in"></div></nav>
+<div id="toast" hidden role="status"></div>
 
 <script>
 "use strict";
@@ -234,7 +248,8 @@ function render(d) {
 
   s.log = `<h2>Daily Update Log</h2>` + (log.length ? [...log].reverse().map(logCard).join("") : empty("No updates yet."));
 
-  $("main").innerHTML = TABS.map(([id]) => `<section id="s-${id}" hidden>${s[id]}</section>`).join("");
+  s.profile = profileHtml(d);
+  $("main").innerHTML = [...TABS, ["profile"]].map(([id]) => `<section id="s-${id}" hidden>${s[id]}</section>`).join("");
   show(location.hash.slice(1));
 }
 function logCard(l) {
@@ -242,8 +257,8 @@ function logCard(l) {
     ${l.followup ? `<div class="note"><span class="kicker" style="color:var(--mute)">To follow up</span><br>${esc(l.followup)}</div>` : ""}</div>`;
 }
 function show(id) {
-  if (!TABS.some(t => t[0] === id)) id = "overview";
-  TABS.forEach(([t]) => { const el = $("s-" + t); if (el) el.hidden = t !== id; });
+  if (id !== "profile" && !TABS.some(t => t[0] === id)) id = "overview";
+  [...TABS, ["profile"]].forEach(([t]) => { const el = $("s-" + t); if (el) el.hidden = t !== id; });
   document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-current", b.dataset.tab === id ? "true" : "false"));
   window.scrollTo(0, 0);
 }
@@ -264,7 +279,9 @@ function showLock(form, msg) {
   if (msg) $(form).querySelector(".err").textContent = msg;
   const first = $(form).querySelector("input"); if (first) first.focus({preventScroll: true});
 }
+let lastData = null;
 function showApp(d) {
+  lastData = d;
   render(d);
   const p = profile();
   $("who").textContent = p ? "Signed in as " + p.name : "";
@@ -273,7 +290,11 @@ function showApp(d) {
 function lockNow() {
   rawKey = null; $("main").innerHTML = "";
   const p = profile();
-  if (p) { $("li-hello").textContent = "Welcome back, " + p.name; showLock("f-login"); } else showLock("f-team");
+  if (p) {
+    $("li-hello").textContent = "Welcome back, " + p.name;
+    $("li-biowrap").hidden = !(p.bio && window.PublicKeyCredential);
+    showLock("f-login");
+  } else showLock("f-team");
 }
 async function load() {
   sdel(KEY_STORE); // older versions kept the key unprotected; remove it
@@ -348,7 +369,133 @@ $("refresh").addEventListener("click", async () => {
   const b = $("refresh"); b.disabled = true; b.textContent = "…";
   await load(); b.disabled = false; b.textContent = "Refresh";
 });
-$("lockbtn").addEventListener("click", lockNow);
+$("profbtn").addEventListener("click", () => { history.replaceState(null, "", "#profile"); show("profile"); });
+
+// ---- Profile page + Face ID / fingerprint unlock ----
+// Biometric unlock uses a passkey on this phone (WebAuthn PRF): the phone releases a secret only after
+// Face ID / fingerprint / screen lock, and that secret unwraps the team key. Nothing is stored unprotected.
+function toast(t) {
+  const el = $("toast"); el.textContent = t; el.hidden = false;
+  clearTimeout(toast.t); toast.t = setTimeout(() => { el.hidden = true; }, 3500);
+}
+function saveProfile(p) { sset(PROFILE, JSON.stringify(p)); if (lastData) { render(lastData); } $("who").textContent = "Signed in as " + p.name; }
+function profileHtml(d) {
+  const p = profile() || {name: ""};
+  const n = (p.name || "").toLowerCase();
+  const me = (d.team || []).find(m => m.name && (m.name.toLowerCase() === n || m.name.toLowerCase().startsWith(n + " ")));
+  const bioOk = !!window.PublicKeyCredential;
+  return `<h2>My Profile</h2>
+    <div class="card">
+      <div class="row"><div class="k">Name</div><div class="v">${esc(p.name)}</div></div>
+      <div class="row"><div class="k">Role</div><div class="v">${me ? esc(me.role) : '<span class="mute">Not on the team list yet</span>'}</div></div>
+      <div class="row"><div class="k">Unlock with</div><div class="v">Personal password${p.bio ? "<br>Face ID / fingerprint" : ""}</div></div>
+    </div>
+    <h2>Face ID / fingerprint</h2>
+    <div class="card">
+      <div class="mute small">${p.bio ? "On for this phone. You can still use your personal password." : bioOk ? "Unlock with Face ID, fingerprint or your phone screen lock instead of typing your password." : "This browser does not support it. Keep using your personal password."}</div>
+      ${bioOk ? `<button class="wide ${p.bio ? "" : "primary"}" id="pf-bio">${p.bio ? "Turn off" : "Turn on"}</button>` : ""}
+    </div>
+    <h2>Change name</h2>
+    <form class="card" id="pf-name-form" autocomplete="off">
+      <input id="pf-name" type="text" maxlength="40" required value="${esc(p.name)}" style="margin-top:0">
+      <button class="wide" type="submit">Save name</button>
+    </form>
+    <h2>Change personal password</h2>
+    <form class="card" id="pf-pw-form" autocomplete="off">
+      <input id="pf-cur" type="password" placeholder="Current password" required style="margin-top:0" autocapitalize="off">
+      <input id="pf-new" type="password" placeholder="New password (6+ characters)" minlength="6" required autocapitalize="off">
+      <input id="pf-new2" type="password" placeholder="Repeat new password" minlength="6" required autocapitalize="off">
+      <button class="wide" type="submit">Change password</button>
+    </form>
+    <h2>This phone</h2>
+    <div class="card">
+      <button class="wide" id="pf-lock" style="margin-top:0">Lock now</button>
+      <button class="wide" id="pf-out">Sign out of this phone</button>
+      <div class="mute small" style="margin-top:10px">Signing out removes your login from this phone only. You can set it up again with the team password.</div>
+    </div>`;
+}
+const rnd = n => crypto.getRandomValues(new Uint8Array(n));
+async function bioKeyFrom(first) { return crypto.subtle.importKey("raw", first, "AES-GCM", false, ["encrypt", "decrypt"]); }
+async function bioGet(idB64, saltB64) {
+  const a = await navigator.credentials.get({publicKey: {
+    challenge: rnd(32), rpId: location.hostname, userVerification: "required",
+    allowCredentials: [{type: "public-key", id: unb64(idB64)}],
+    extensions: {prf: {eval: {first: unb64(saltB64)}}}
+  }});
+  const r = a.getClientExtensionResults().prf;
+  if (!r || !r.results || !r.results.first) throw new Error("noprf");
+  return bioKeyFrom(r.results.first);
+}
+async function bioEnable() {
+  const p = profile(); if (!p || !rawKey) return;
+  const salt = rnd(32);
+  let cred;
+  try {
+    cred = await navigator.credentials.create({publicKey: {
+      challenge: rnd(32), rp: {name: "Campaign Tracker", id: location.hostname},
+      user: {id: rnd(16), name: p.name, displayName: p.name},
+      pubKeyCredParams: [{type: "public-key", alg: -7}, {type: "public-key", alg: -257}],
+      authenticatorSelection: {authenticatorAttachment: "platform", userVerification: "required", residentKey: "preferred"},
+      extensions: {prf: {eval: {first: salt}}}
+    }});
+  } catch (e) { toast("Cancelled. Face ID / fingerprint is still off."); return; }
+  const ext = cred.getClientExtensionResults().prf;
+  if (!ext || (!ext.enabled && !(ext.results && ext.results.first))) {
+    toast("This phone cannot do secure Face ID / fingerprint unlock here. Keep using your password."); return;
+  }
+  const id = b64(cred.rawId), saltB64 = b64(salt);
+  let k;
+  try { k = (ext.results && ext.results.first) ? await bioKeyFrom(ext.results.first) : await bioGet(id, saltB64); }
+  catch (e) { toast("Could not finish setup. Face ID / fingerprint is still off."); return; }
+  const iv = rnd(12);
+  const wrapped = await crypto.subtle.encrypt({name: "AES-GCM", iv}, k, rawKey);
+  p.bio = {id, salt: saltB64, iv: b64(iv), key: b64(wrapped)};
+  saveProfile(p); show("profile"); toast("Face ID / fingerprint unlock is on.");
+}
+$("main").addEventListener("click", async ev => {
+  const b = ev.target.closest("button"); if (!b) return;
+  if (b.id === "pf-bio") {
+    const p = profile(); if (!p) return;
+    if (p.bio) { delete p.bio; saveProfile(p); show("profile"); toast("Face ID / fingerprint unlock is off."); }
+    else { b.disabled = true; await bioEnable(); b.disabled = false; }
+  } else if (b.id === "pf-lock") lockNow();
+  else if (b.id === "pf-out") {
+    if (b.dataset.sure) { sdel(PROFILE); rawKey = null; lockNow(); }
+    else { b.dataset.sure = "1"; b.textContent = "Tap again to sign out"; }
+  }
+});
+$("main").addEventListener("submit", async ev => {
+  const f = ev.target; ev.preventDefault();
+  const p = profile(); if (!p) return;
+  if (f.id === "pf-name-form") {
+    const name = $("pf-name").value.trim(); if (!name) return;
+    p.name = name; saveProfile(p); show("profile"); toast("Name saved.");
+  } else if (f.id === "pf-pw-form") {
+    const cur = $("pf-cur").value, n1 = $("pf-new").value, n2 = $("pf-new2").value;
+    if (n1.length < 6) { toast("Use at least 6 characters."); return; }
+    if (n1 !== n2) { toast("The two new passwords do not match."); return; }
+    let raw;
+    try { raw = await crypto.subtle.decrypt({name: "AES-GCM", iv: unb64(p.iv)}, await pinKey(cur, unb64(p.salt)), unb64(p.key)); }
+    catch (e) { toast("Current password is wrong."); return; }
+    const salt = rnd(16), iv = rnd(12);
+    const wrapped = await crypto.subtle.encrypt({name: "AES-GCM", iv}, await pinKey(n1, salt), raw);
+    p.salt = b64(salt); p.iv = b64(iv); p.key = b64(wrapped);
+    saveProfile(p); show("profile"); toast("Password changed.");
+  }
+});
+$("li-bio").addEventListener("click", async () => {
+  const p = profile(); if (!p || !p.bio) return;
+  const err = $("f-login").querySelector(".err"); err.textContent = "";
+  let raw;
+  try {
+    const k = await bioGet(p.bio.id, p.bio.salt);
+    raw = await crypto.subtle.decrypt({name: "AES-GCM", iv: unb64(p.bio.iv)}, k, unb64(p.bio.key));
+  } catch (e) { err.textContent = "Could not unlock that way. Enter your personal password."; return; }
+  let enc;
+  try { enc = await fetchEnc(); } catch (e) { err.textContent = NET_ERR; return; }
+  try { rawKey = raw; showApp(await decrypt(raw, enc)); }
+  catch (e) { rawKey = null; sdel(PROFILE); showLock("f-team", "The team password has changed. Please enter the new one."); }
+});
 document.addEventListener("visibilitychange", () => { if (!document.hidden && !$("app").hidden) load(); });
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
