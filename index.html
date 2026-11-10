@@ -298,6 +298,34 @@ function ymd(s, plusDays) {
   const d = new Date(s + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + (plusDays || 0));
   return d.toISOString().slice(0, 10).replace(/-/g, "");
 }
+function emailsOf(names, d) { return (d.team || []).filter(m => names.includes(m.name) && m.email).map(m => m.email); }
+function calLink({text, dates, details, location, emails}) {
+  const q = new URLSearchParams({action: "TEMPLATE", text, dates, details: details || "", ctz: "Asia/Kuala_Lumpur"});
+  if (location) q.set("location", location);
+  if (emails && emails.length) q.set("add", emails.join(","));
+  return "https://calendar.google.com/calendar/render?" + q.toString();
+}
+function dueBlock(date, hm) { // a short block ending the day at most
+  const [h, m] = hm.split(":").map(Number), len = Math.max(1, Math.min(30, 24 * 60 - (h * 60 + m)));
+  return stamp(date, hm) + "/" + stamp(date, hm, len);
+}
+const SITE_LINE = () => "Campaign Tracker: " + location.origin + location.pathname;
+function shootUrl(x, d) {
+  if (!x.date) return "";
+  const st = x.time || "09:00", et = x.endTime || null;
+  const [h, m] = st.split(":").map(Number);
+  const dates = stamp(x.date, st) + "/" + (et && et > st ? stamp(x.date, et) : stamp(x.date, st, Math.min(120, 24 * 60 - (h * 60 + m))));
+  const ppl = x.people || [];
+  return calLink({text: x.project, dates, location: x.location, emails: emailsOf(ppl, d),
+    details: [x.notes, ppl.length ? "Crew: " + ppl.join(", ") : "", x.crew ? "Also: " + x.crew : "", SITE_LINE()].filter(Boolean).join("\n\n")});
+}
+function followUrl(b, d) {
+  if (!b.next) return "";
+  const ppl = b.followBy || [];
+  return calLink({text: "Follow up: " + b.brand, dates: dueBlock(b.next, b.nextTime || DEF_DUE), emails: emailsOf(ppl, d),
+    details: [b.contact ? "Contact: " + b.contact : "", b.status ? "Status: " + b.status : "", b.notes, SITE_LINE()].filter(Boolean).join("\n\n")});
+}
+const inviteBtn = url => url ? `<a class="wide primary" href="${esc(url)}" target="_blank" rel="noopener" style="margin:0;flex:1.4;text-align:center;text-decoration:none;border-radius:14px;font-weight:600;display:block;padding:9px 8px;font-size:13px;min-height:40px;line-height:22px">Send calendar invite</a>` : "";
 function calUrl(t, d) {
   const names = assignees(t);
   const emails = (d.team || []).filter(m => names.includes(m.name) && m.email).map(m => m.email);
@@ -326,7 +354,7 @@ function tasksHtml(d) {
       ${(admin || mine(t)) && canWrite(d) ? `<div class="seg" role="group" aria-label="Status">${TASK_STATUS.map(x => `<button data-tstatus="${i}" data-v="${x}" aria-pressed="${(t.status || "Not started") === x}">${x}</button>`).join("")}</div>` : ""}
       ${admin ? `<div style="display:flex;gap:8px;margin-top:12px">
         <button class="wide" data-task="${i}" style="margin:0;flex:1">Edit</button>
-        ${cal ? `<a class="wide primary" href="${esc(cal)}" target="_blank" rel="noopener" style="margin:0;flex:1.4;text-align:center;text-decoration:none;border-radius:14px;font-weight:600;display:block">Send calendar invite</a>` : ""}
+        ${inviteBtn(cal)}
       </div>` : ""}</div>`;
     }).join("") : empty("No tasks yet."));
 }
@@ -380,13 +408,35 @@ function myTasksHtml(d) {
     <button class="wide" data-goto="tasks">Open Tasks</button></div>`;
 }
 let inboxEdit = null; // the "at" of the update being edited
+let offerEdit = null; // working copy of "What we can provide"
+function offerEditorHtml() {
+  const o = offerEdit;
+  return `<h2>Edit: what we provide</h2>
+    <form class="card ed" id="of-form" autocomplete="off" style="border:0">
+      <label>Heading<input id="of-head" value="${esc(o.heading)}" maxlength="80"></label>
+      ${o.deliverables.map((x, i) => `<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end">
+        <label>Item ${i + 1}<input data-of="item" data-i="${i}" value="${esc(x.item)}" maxlength="60"></label>
+        <label>Details<input data-of="spec" data-i="${i}" value="${esc(x.spec)}" placeholder="e.g. 20 photos" maxlength="60"></label>
+        <button type="button" data-offer="rm" data-i="${i}" aria-label="Remove item ${i + 1}" style="background:var(--badbg);color:var(--bad);min-height:48px;padding:0 14px">×</button></div>`).join("")}
+      <button class="wide" type="button" data-offer="add">+ Add item</button>
+      <label>Estimated duration<input id="of-dur" value="${esc(o.duration)}" maxlength="60"></label>
+      <button class="wide primary" type="submit">Save</button>
+      <button class="wide" type="button" data-offer="cancel">Cancel</button>
+    </form>`;
+}
+function readOffer() {
+  offerEdit.heading = $("of-head").value.trim(); offerEdit.duration = $("of-dur").value.trim();
+  document.querySelectorAll("#of-form [data-of]").forEach(el => { offerEdit.deliverables[+el.dataset.i][el.dataset.of] = el.value.trim(); });
+}
 // generic admin editor for Brands, Shoots and Budget
 const REC = {
   outreach: {title: "brand", tab: "brands", label: "Brand", fields: [
     ["brand", "Brand", "text", 1], ["contact", "Contact person", "text"], ["status", "Status", ["To contact", "Contacted", "Replied", "In discussion", "Confirmed", "Declined"]],
-    ["contacted", "Date contacted", "date"], ["next", "Next follow-up", "date"], ["notes", "Notes", "area"]]},
+    ["contacted", "Date contacted", "date"], ["next", "Next follow-up", "date"], ["nextTime", "Follow-up time (no time: 11:59 pm)", "time"],
+    ["followBy", "Who follows up", "people"], ["notes", "Notes", "area"]]},
   shoots: {title: "project", tab: "shoots", label: "Shoot", fields: [
-    ["project", "Project", "text", 1], ["date", "Date", "date", 1], ["time", "Time", "time"], ["location", "Location", "text"], ["crew", "Crew", "text"], ["notes", "Notes", "area"]]},
+    ["project", "Project", "text", 1], ["date", "Date", "date", 1], ["time", "Start time (no time: 9:00 am)", "time"], ["endTime", "End time (no time: 2 hours)", "time"],
+    ["location", "Location", "text"], ["people", "Crew from the team", "people"], ["crew", "Other crew (not on the team)", "text"], ["notes", "Notes", "area"]]},
   budget: {title: "item", tab: "budget", label: "Entry", fields: [
     ["item", "Item", "text", 1], ["type", "Type", ["Expense", "Income"]], ["amount", "Amount (RM)", "number", 1], ["date", "Date", "date"], ["by", "Handled by", "text"], ["notes", "Notes", "area"]]}
 };
@@ -395,7 +445,10 @@ function recEditorHtml() {
   const c = REC[recEdit.col], r = recEdit.r;
   return `<h2>${recEdit.i < 0 ? "New " : "Edit "}${c.label.toLowerCase()}</h2>
     <form class="card ed" id="re-form" autocomplete="off" style="border:0">
-      ${c.fields.map(([k, lab, type, req]) => Array.isArray(type)
+      ${c.fields.map(([k, lab, type, req]) => type === "people"
+        ? `<div style="font-size:12px;font-weight:600;color:var(--mute);margin-top:14px">${lab}</div>` + (lastData.team || []).filter(m => m.name).map(m => `<label class="chk"><input type="checkbox" data-pk="${k}" value="${esc(m.name)}" ${(r[k] || []).includes(m.name) ? "checked" : ""}>
+            <span>${esc(m.name)} <span class="mute small">· ${esc(m.role)}${m.email ? "" : " · no email"}</span></span></label>`).join("")
+        : Array.isArray(type)
         ? `<label>${lab}<select data-k="${k}">${type.map(o => `<option ${o === (r[k] || type[0]) ? "selected" : ""}>${o}</option>`).join("")}</select></label>`
         : type === "area" ? `<label>${lab}<textarea data-k="${k}" maxlength="600">${esc(r[k])}</textarea></label>`
         : `<label>${lab}<input data-k="${k}" type="${type}" value="${esc(r[k])}" ${type === "number" ? 'step="0.01" min="0" inputmode="decimal"' : ""} ${req ? "required" : ""} maxlength="120"></label>`).join("")}
@@ -407,6 +460,7 @@ function recEditorHtml() {
 function readRecForm() {
   const r = {};
   document.querySelectorAll("#re-form [data-k]").forEach(el => { const v = el.value.trim(); if (v) r[el.dataset.k] = el.type === "number" ? Number(v) : v; });
+  document.querySelectorAll("#re-form [data-pk]").forEach(el => { if (el.checked) (r[el.dataset.pk] = r[el.dataset.pk] || []).push(el.value); });
   return r;
 }
 function rerenderTasks() { $("s-tasks").innerHTML = tasksHtml(lastData); }
@@ -458,24 +512,25 @@ function render(d) {
       <div class="row mid">${m.name ? `<div class="av" aria-hidden="true">${esc(m.name.trim().charAt(0).toUpperCase())}</div>` : '<div class="av none" aria-hidden="true"></div>'}<div class="grow"><div>${m.name ? '<span class="nm">' + esc(m.name) + '</span>' + (m.admin ? ' <span class="badge" style="display:inline-block;margin-left:0">Admin</span>' : "") : '<span class="mute" style="font-weight:400">To be added</span>'}</div>
       ${m.contact ? `<div class="mute small">${esc(m.contact)}</div>` : ""}${m.notes ? `<div class="mute small">${esc(m.notes)}</div>` : ""}</div>
       <span class="pill ${m.name ? "tint" : ""}">${esc(m.role)}</span></div>`).join("") || '<div class="mute">No team members yet.</div>'}</div>
-    <h2>${esc(offer.heading || "What we provide")}</h2>
+    ${offerEdit ? offerEditorHtml() : `<h2>${esc(offer.heading || "What we provide")}</h2>
     <div class="card">${(offer.deliverables || []).map((x, i) => `
       <div class="row mid"><span class="num">${String(i + 1).padStart(2, "0")}</span><div class="grow">${esc(x.item)}</div><div class="v mute small">${x.spec ? esc(x.spec) : "To be decided"}</div></div>`).join("")}
-      ${offer.duration ? `<div class="row mid"><div class="k small">Estimated duration</div><span class="pill tint">${esc(offer.duration)}</span></div>` : ""}</div>
+      ${offer.duration ? `<div class="row mid"><div class="k small">Estimated duration</div><span class="pill tint">${esc(offer.duration)}</span></div>` : ""}
+      ${isAdmin() ? `<div class="mini" style="margin-top:12px"><button data-offer="edit">Edit</button></div>` : ""}</div>`}
     ${log.length ? `<h2>Latest update</h2>${logCard(log[log.length - 1])}` : ""}`;
 
   s.tasks = tasksHtml(d);
 
   const adm = isAdmin();
   const addBtn = col => adm ? `<button class="wide primary" data-rec="new" data-col="${col}" style="margin-top:0">+ Add</button>` : "";
-  const editBtn = (col, i) => adm ? `<div class="mini" style="margin-top:12px"><button data-rec="${i}" data-col="${col}">Edit</button></div>` : "";
+  const editBtn = (col, i, url) => adm ? `<div class="mini" style="margin-top:12px"><button data-rec="${i}" data-col="${col}">Edit</button>${inviteBtn(url)}</div>` : "";
   s.brands = (recEdit && recEdit.col === "outreach") ? recEditorHtml() : `<h2>Brand / Client Outreach</h2>${addBtn("outreach")}` + (out.length ? out.map((b, i) => `
     <div class="card"><div class="head"><div class="ttl">${esc(b.brand)}</div>${pill(b.status)}</div>
-    ${meta([["Contact", b.contact], ["Contacted", fmtDate(b.contacted)], ["Next follow-up", fmtDate(b.next)]])}${note(b.notes)}${editBtn("outreach", i)}</div>`).join("") : empty("No brands contacted yet."));
+    ${meta([["Contact", b.contact], ["Contacted", fmtDate(b.contacted)], ["Next follow-up", b.next ? fmtDate(b.next) + ", " + fmtTime(b.nextTime || DEF_DUE) : ""], ["Follow-up by", (b.followBy || []).join(", ")]])}${note(b.notes)}${editBtn("outreach", i, followUrl(b, d))}</div>`).join("") : empty("No brands contacted yet."));
 
   s.shoots = (recEdit && recEdit.col === "shoots") ? recEditorHtml() : `<h2>Shoot Schedule</h2>${addBtn("shoots")}` + (shoots.length ? shoots.map((x, i) => [x, i]).sort((a, b) => (a[0].date || "").localeCompare(b[0].date || "")).map(([x, i]) => `
-    <div class="card"><div class="kicker">${esc(fmtDate(x.date))}${x.time ? " · " + esc(fmtTime(x.time)) : ""}</div>
-    <div class="ttl">${esc(x.project)}</div>${meta([["Location", x.location], ["Crew", x.crew]])}${note(x.notes)}${editBtn("shoots", i)}</div>`).join("") : empty("No shoots scheduled yet."));
+    <div class="card"><div class="kicker">${esc(fmtDate(x.date))}${x.time ? " · " + esc(fmtTime(x.time)) + (x.endTime ? " – " + esc(fmtTime(x.endTime)) : "") : ""}</div>
+    <div class="ttl">${esc(x.project)}</div>${meta([["Location", x.location], ["Crew", [...(x.people || []), x.crew].filter(Boolean).join(", ")]])}${note(x.notes)}${editBtn("shoots", i, shootUrl(x, d))}</div>`).join("") : empty("No shoots scheduled yet."));
 
   const inc = budget.filter(x => /income/i.test(x.type || "")).reduce((a, x) => a + Number(x.amount || 0), 0);
   const exp = budget.filter(x => /expense/i.test(x.type || "")).reduce((a, x) => a + Number(x.amount || 0), 0);
@@ -786,6 +841,13 @@ function syncReview() {
 function rerenderAdmin() { $("s-admin").innerHTML = adminHtml(lastData); }
 $("main").addEventListener("click", async ev => {
   const b = ev.target.closest("button"); if (!b) return;
+  if (b.dataset.offer) {
+    const v = b.dataset.offer;
+    if (v === "edit") offerEdit = JSON.parse(JSON.stringify(Object.assign({heading: "", deliverables: [], duration: ""}, lastData.offer || {})));
+    else if (v === "cancel") offerEdit = null;
+    else { readOffer(); if (v === "add") offerEdit.deliverables.push({item: "", spec: ""}); if (v === "rm") offerEdit.deliverables.splice(+b.dataset.i, 1); }
+    render(lastData); show("overview"); return;
+  }
   if (b.dataset.goto) { history.replaceState(null, "", "#" + b.dataset.goto); show(b.dataset.goto); return; }
   if (b.dataset.tstatus !== undefined) {
     const i = +b.dataset.tstatus, v = b.dataset.v, key = ((lastData.tasks || [])[i] || {}).task;
@@ -952,10 +1014,19 @@ $("main").addEventListener("submit", async ev => {
   }
 }, true);
 $("main").addEventListener("submit", async ev => {
+  if (ev.target.id !== "of-form") return;
+  ev.preventDefault(); ev.stopImmediatePropagation(); readOffer();
+  const o = {heading: offerEdit.heading || "What we provide", deliverables: offerEdit.deliverables.filter(x => x.item), duration: offerEdit.duration};
+  const btn = ev.target.querySelector("button[type=submit]"); btn.disabled = true; btn.textContent = "Saving…";
+  try { const d = await publish(x => { x.offer = o; }, "Edit what we provide"); offerEdit = null; showApp(d); show("overview"); toast("Saved."); }
+  catch (e) { toast(e.message === "notoken" ? "Connect GitHub in Admin first." : "Could not save. Try again."); btn.disabled = false; btn.textContent = "Save"; }
+}, true);
+$("main").addEventListener("submit", async ev => {
   if (ev.target.id !== "re-form") return;
   ev.preventDefault(); ev.stopImmediatePropagation();
   const {col, i, before} = recEdit, c = REC[col], r = readRecForm();
   for (const [k, lab, type, req] of c.fields) if (req && (r[k] === undefined || r[k] === "")) { toast(lab + " is needed."); return; }
+  if (col === "shoots" && r.endTime && r.endTime <= (r.time || "09:00")) { toast("End time is before the start time."); return; }
   const btn = ev.target.querySelector("button[type=submit]"); btn.disabled = true; btn.textContent = "Saving…";
   try {
     const d = await publish(x => {
