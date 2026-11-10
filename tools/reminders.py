@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""List the deadline reminder emails due today (Malaysia time). Sends nothing itself.
+"""List the reminder emails due today (Malaysia time). Sends nothing itself.
 
   TRACKER_PW=... python3 tools/reminders.py data.enc.json [YYYY-MM-DD]
 
 Prints JSON: [{"to": [...], "subject": "...", "body": "..."}]
-A task is due on its deadline, or on its end date for start -> end tasks.
-Reminders go 7, 3 and 1 day(s) before, to the assigned members' emails.
-Tasks marked Done are skipped. Tasks with no assignee (or no emails) go to the admins.
+Reminders go 7, 3 and 1 day(s) before:
+  - tasks: their deadline (or end date for start -> end tasks), to the assignees; Done tasks skipped
+  - shoots: the shoot date, to the team crew
+  - brands: the next follow-up date, to whoever follows up; Confirmed / Declined skipped
+Anything with no one (or no emails) goes to the admins.
 """
 import base64, datetime as dt, json, os, sys
 from cryptography.hazmat.primitives import hashes
@@ -30,6 +32,10 @@ def fmt_time(hm):
     return f"{(h % 12) or 12}:{m:02d} {'am' if h < 12 else 'pm'}"
 
 
+def fmt_day(iso):
+    return dt.date.fromisoformat(iso).strftime("%a, %d %b %Y").replace(" 0", " ")
+
+
 def main():
     d = load(sys.argv[1], os.environ["TRACKER_PW"])
     today = dt.date.fromisoformat(sys.argv[2]) if len(sys.argv) > 2 else dt.datetime.now(MYT).date()
@@ -37,6 +43,23 @@ def main():
     emails = {m["name"]: m["email"] for m in team if m.get("name") and m.get("email")}
     admins = [m["email"] for m in team if m.get("admin") and m.get("email")] or [ADMIN_FALLBACK]
     out = []
+
+    def add(kind, title, due, hm, names, details):
+        lead = (dt.date.fromisoformat(due) - today).days
+        if lead not in LEADS:
+            return
+        to = sorted({emails[n] for n in names if n in emails}) or admins
+        when = fmt_day(due) + ", " + fmt_time(hm)
+        first = {"Task": f"Reminder: \"{title}\" is due {LEADS[lead]}.",
+                 "Shoot": f"Reminder: the shoot \"{title}\" is {LEADS[lead]}.",
+                 "Follow-up": f"Reminder: follow up with {title} {LEADS[lead]}."}[kind]
+        lines = [first, "",
+                 ("Due: " if kind == "Task" else "When: ") + when]
+        lines += [x for x in details if x]
+        lines += ["", "Campaign Tracker: " + SITE, "", "This is an automatic reminder from the Campaign Tracker."]
+        label = {"Task": f"{title} due", "Shoot": f"Shoot: {title}", "Follow-up": f"Follow up with {title}"}[kind]
+        out.append({"to": to, "subject": f"Reminder: {label} {LEADS[lead]} ({fmt_day(due)[5:]})", "body": "\n".join(lines)})
+
     for t in d.get("tasks", []):
         if "done" in (t.get("status") or "").lower():
             continue
@@ -46,23 +69,34 @@ def main():
             due, hm = t["deadline"], t.get("time") or "23:59"
         else:
             continue
-        lead = (dt.date.fromisoformat(due) - today).days
-        if lead not in LEADS:
-            continue
         names = t.get("assignees") or ([t["owner"]] if t.get("owner") else [])
-        to = sorted({emails[n] for n in names if n in emails}) or admins
-        when = dt.date.fromisoformat(due).strftime("%a, %d %b %Y").replace(" 0", " ") + ", " + fmt_time(hm)
-        lines = [f"Reminder: \"{t['task']}\" is due {LEADS[lead]}.", "", f"Due: {when}"]
-        if t.get("start") and t.get("end"):
-            lines.append("Started: " + dt.date.fromisoformat(t["start"]).strftime("%a, %d %b").replace(" 0", " "))
-        if names:
-            lines.append("Assigned: " + ", ".join(names))
-        if t.get("status"):
-            lines.append("Status: " + t["status"])
-        if t.get("notes"):
-            lines += ["", t["notes"]]
-        lines += ["", "Campaign Tracker: " + SITE, "", "This is an automatic reminder. Mark the task Done in the tracker to stop reminders."]
-        out.append({"to": to, "subject": f"Reminder: {t['task']} due {LEADS[lead]} ({when.split(',')[1].strip()})", "body": "\n".join(lines)})
+        add("Task", t["task"], due, hm, names, [
+            "Assigned: " + ", ".join(names) if names else "",
+            "Status: " + t["status"] if t.get("status") else "",
+            "\n" + t["notes"] if t.get("notes") else "",
+            "\nMark the task Done in the tracker to stop reminders."])
+
+    for s in d.get("shoots", []):
+        if not s.get("date"):
+            continue
+        names = s.get("people") or []
+        st = s.get("time") or "09:00"
+        add("Shoot", s.get("project", "Shoot"), s["date"], st, names, [
+            "Until: " + fmt_time(s["endTime"]) if s.get("endTime") else "",
+            "Location: " + s["location"] if s.get("location") else "",
+            "Crew: " + ", ".join(names + ([s["crew"]] if s.get("crew") else [])) if (names or s.get("crew")) else "",
+            "\n" + s["notes"] if s.get("notes") else ""])
+
+    for b in d.get("outreach", []):
+        if not b.get("next") or (b.get("status") or "") in ("Confirmed", "Declined"):
+            continue
+        names = b.get("followBy") or []
+        add("Follow-up", b.get("brand", "brand"), b["next"], b.get("nextTime") or "23:59", names, [
+            "Contact: " + b["contact"] if b.get("contact") else "",
+            "Status: " + b["status"] if b.get("status") else "",
+            "Follow-up by: " + ", ".join(names) if names else "",
+            "\n" + b["notes"] if b.get("notes") else ""])
+
     print(json.dumps(out, ensure_ascii=False, indent=2))
 
 

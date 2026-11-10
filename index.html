@@ -400,12 +400,20 @@ function canWrite(d) { return !!((d && d.submitToken) || (profile() || {}).gh); 
 function mine(t) { const me = lastData && findMe(lastData); return !!(me && assignees(t).includes(me.name)); }
 function myTasksHtml(d) {
   const me = findMe(d); if (!me) return "";
-  const list = (d.tasks || []).map((t, i) => [t, i]).filter(([t]) => assignees(t).includes(me.name) && !/done/i.test(t.status || ""));
-  if (!list.length) return "";
-  return `<h2>Assigned to you (${list.length})</h2><div class="card">${list.map(([t]) => `<div class="mytask">
-    <div class="head"><div style="font-weight:700">${esc(t.task)}</div>${pill(t.status)}</div>
-    ${whenText(t) ? `<div class="mute small" style="margin-top:2px">${esc(whenText(t))}</div>` : ""}</div>`).join("")}
-    <button class="wide" data-goto="tasks">Open Tasks</button></div>`;
+  const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  const items = [];
+  (d.tasks || []).forEach(t => { if (assignees(t).includes(me.name) && !/done/i.test(t.status || ""))
+    items.push({key: t.end || t.deadline || "9999", kind: "Task", title: t.task, when: whenText(t), right: pill(t.status), tab: "tasks"}); });
+  (d.shoots || []).forEach(x => { if ((x.people || []).includes(me.name) && (x.date || "") >= today)
+    items.push({key: x.date, kind: "Shoot", title: x.project, when: fmtDate(x.date) + (x.time ? ", " + fmtTime(x.time) : "") + (x.location ? " · " + x.location : ""), tab: "shoots"}); });
+  (d.outreach || []).forEach(b => { if ((b.followBy || []).includes(me.name) && b.next && b.next >= today && !/confirmed|declined/i.test(b.status || ""))
+    items.push({key: b.next, kind: "Follow up", title: b.brand, when: fmtDate(b.next) + ", " + fmtTime(b.nextTime || DEF_DUE), tab: "brands"}); });
+  if (!items.length) return "";
+  items.sort((a, b) => a.key.localeCompare(b.key));
+  return `<h2>Coming up for you (${items.length})</h2><div class="card">${items.map(x => `<div class="mytask">
+    <div class="head"><div><span class="pill tint" style="font-size:11px;padding:2px 8px;margin-right:6px">${x.kind}</span><span style="font-weight:700">${esc(x.title)}</span></div>${x.right || ""}</div>
+    ${x.when ? `<div class="mute small" style="margin-top:4px">${esc(x.when)}</div>` : ""}
+    <div class="mini"><button data-goto="${x.tab}">Open</button></div></div>`).join("")}</div>`;
 }
 let inboxEdit = null; // the "at" of the update being edited
 let offerEdit = null; // working copy of "What we can provide"
@@ -438,7 +446,9 @@ const REC = {
     ["project", "Project", "text", 1], ["date", "Date", "date", 1], ["time", "Start time (no time: 9:00 am)", "time"], ["endTime", "End time (no time: 2 hours)", "time"],
     ["location", "Location", "text"], ["people", "Crew from the team", "people"], ["crew", "Other crew (not on the team)", "text"], ["notes", "Notes", "area"]]},
   budget: {title: "item", tab: "budget", label: "Entry", fields: [
-    ["item", "Item", "text", 1], ["type", "Type", ["Expense", "Income"]], ["amount", "Amount (RM)", "number", 1], ["date", "Date", "date"], ["by", "Handled by", "text"], ["notes", "Notes", "area"]]}
+    ["item", "Item", "text", 1], ["type", "Type", ["Expense", "Income"]], ["amount", "Amount (RM)", "number", 1], ["date", "Date", "date"], ["by", "Handled by", "text"], ["notes", "Notes", "area"]]},
+  log: {title: "date", tab: "log", label: "Log entry", fields: [
+    ["date", "Date", "date", 1], ["progress", "Progress", "area", 1], ["followup", "To follow up", "area"]]}
 };
 let recEdit = null; // {col, i, r, before}
 function recEditorHtml() {
@@ -544,16 +554,16 @@ function render(d) {
     <span class="pill ${/income/i.test(x.type || "") ? "good" : "bad"}">${/income/i.test(x.type || "") ? "+" : "−"} ${esc(money(x.amount))}</span></div>
     ${meta([["Date", fmtDate(x.date)], ["Handled by", x.by]])}${note(x.notes)}${editBtn("budget", i)}</div>`).join("") : empty("No income or expenses recorded yet."));
 
-  s.log = `<h2>Daily Update Log</h2>` + (log.length ? [...log].reverse().map(logCard).join("") : empty("No updates yet."));
+  s.log = (recEdit && recEdit.col === "log") ? recEditorHtml() : `<h2>Daily Update Log</h2>${addBtn("log")}` + (log.length ? log.map((l, i) => [l, i]).reverse().map(([l, i]) => logCard(l, editBtn("log", i))).join("") : empty("No updates yet."));
 
   s.profile = profileHtml(d);
   s.admin = adminHtml(d);
   $("main").innerHTML = [...TABS, ["profile"], ["admin"]].map(([id]) => `<section id="s-${id}" hidden>${s[id]}</section>`).join("");
   show(location.hash.slice(1));
 }
-function logCard(l) {
+function logCard(l, extra) {
   return `<div class="card"><div class="kicker">${esc(fmtDate(l.date))}</div><div style="margin-top:6px;white-space:pre-wrap">${esc(l.progress)}</div>
-    ${l.followup ? `<div class="note"><span style="font-weight:700">To follow up</span><br>${esc(l.followup)}</div>` : ""}</div>`;
+    ${l.followup ? `<div class="note"><span style="font-weight:700">To follow up</span><br>${esc(l.followup)}</div>` : ""}${extra || ""}</div>`;
 }
 function show(id) {
   if (id === "admin" && !isAdmin()) id = "profile";
@@ -879,7 +889,7 @@ $("main").addEventListener("click", async ev => {
   }
   if (b.dataset.rec !== undefined) {
     const v = b.dataset.rec;
-    if (v === "new") { const col = b.dataset.col; recEdit = {col, i: -1, r: col === "budget" ? {type: "Expense"} : {}}; render(lastData); show(REC[col].tab); window.scrollTo(0, 0); return; }
+    if (v === "new") { const col = b.dataset.col; recEdit = {col, i: -1, r: col === "budget" ? {type: "Expense"} : col === "log" ? {date: new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10)} : {}}; render(lastData); show(REC[col].tab); window.scrollTo(0, 0); return; }
     if (v === "cancel") { const tab = REC[recEdit.col].tab; recEdit = null; render(lastData); show(tab); return; }
     if (v === "delete") {
       if (!b.dataset.sure) { b.dataset.sure = "1"; b.textContent = "Tap again to delete"; return; }
