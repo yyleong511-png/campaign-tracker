@@ -269,11 +269,18 @@ const empty = t => `<div class="empty">${esc(t)}</div>`;
 const TASK_STATUS = ["Not started", "In progress", "Done", "Blocked"];
 let taskEdit = null; // {i: index or -1, t: working copy}
 const assignees = t => Array.isArray(t.assignees) ? t.assignees : (t.owner ? [t.owner] : []);
+// Times default: deadline 23:59, range 09:00 → 23:59 (Malaysia time)
+const DEF_DUE = "23:59", DEF_START = "09:00";
+function fmtTime(hm) { const [h, m] = hm.split(":").map(Number); return ((h % 12) || 12) + ":" + String(m).padStart(2, "0") + (h < 12 ? " am" : " pm"); }
 function whenText(t) {
-  if (t.start && t.end) return fmtDate(t.start) + " – " + fmtDate(t.end);
-  if (t.start) return "Starts " + fmtDate(t.start);
-  if (t.deadline) return "Due " + fmtDate(t.deadline);
+  if (t.start && t.end) return fmtDate(t.start) + ", " + fmtTime(t.startTime || DEF_START) + " – " + fmtDate(t.end) + ", " + fmtTime(t.endTime || DEF_DUE);
+  if (t.deadline) return "Due " + fmtDate(t.deadline) + ", " + fmtTime(t.time || DEF_DUE);
   return "";
+}
+function stamp(date, hm, plusMin) {
+  const [y, mo, d] = date.split("-").map(Number), [h, mi] = hm.split(":").map(Number);
+  const x = new Date(Date.UTC(y, mo - 1, d, h, mi + (plusMin || 0)));
+  return x.toISOString().slice(0, 16).replace(/[-:]/g, "") + "00";
 }
 function ymd(s, plusDays) {
   const d = new Date(s + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + (plusDays || 0));
@@ -283,8 +290,12 @@ function calUrl(t, d) {
   const names = assignees(t);
   const emails = (d.team || []).filter(m => names.includes(m.name) && m.email).map(m => m.email);
   let dates, text;
-  if (t.start && t.end) { dates = ymd(t.start) + "/" + ymd(t.end, 1); text = t.task; }
-  else if (t.deadline) { dates = ymd(t.deadline) + "/" + ymd(t.deadline, 1); text = "Deadline: " + t.task; }
+  if (t.start && t.end) { dates = stamp(t.start, t.startTime || DEF_START) + "/" + stamp(t.end, t.endTime || DEF_DUE); text = t.task; }
+  else if (t.deadline) {
+    const hm = t.time || DEF_DUE, [h, m] = hm.split(":").map(Number);
+    const len = Math.max(1, Math.min(30, 24 * 60 - (h * 60 + m)));     // short block, never past midnight
+    dates = stamp(t.deadline, hm) + "/" + stamp(t.deadline, hm, len); text = "Deadline: " + t.task;
+  }
   else return "";
   const details = [t.notes, names.length ? "Assigned: " + names.join(", ") : "", "Campaign Tracker: " + location.origin + location.pathname].filter(Boolean).join("\n\n");
   const q = new URLSearchParams({action: "TEMPLATE", text, dates, details, ctz: "Asia/Kuala_Lumpur"});
@@ -319,9 +330,16 @@ function taskEditorHtml(d) {
         <button type="button" data-mode="deadline" class="${mode === "deadline" ? "primary" : ""}" style="margin:0;${mode === "deadline" ? "background:var(--accent);color:#fff" : "background:var(--bg)"}">Deadline only</button>
         <button type="button" data-mode="range" style="margin:0;${mode === "range" ? "background:var(--accent);color:#fff" : "background:var(--bg)"}">Start → End</button>
       </div>
-      ${mode === "range" ? `<label>Start date<input id="te-start" type="date" value="${esc(t.start)}" required></label>
-        <label>End date<input id="te-end" type="date" value="${esc(t.end)}" required></label>`
-      : `<label>Deadline<input id="te-deadline" type="date" value="${esc(t.deadline)}"></label>`}
+      ${mode === "range" ? `<div style="display:grid;grid-template-columns:1.4fr 1fr;gap:8px">
+          <label>Start date<input id="te-start" type="date" value="${esc(t.start)}" required></label>
+          <label>Time<input id="te-stime" type="time" value="${esc(t.startTime)}"></label>
+          <label>End date<input id="te-end" type="date" value="${esc(t.end)}" required></label>
+          <label>Time<input id="te-etime" type="time" value="${esc(t.endTime)}"></label></div>
+        <div class="mute small" style="margin-top:6px">No time set: starts 9:00 am, ends 11:59 pm.</div>`
+      : `<div style="display:grid;grid-template-columns:1.4fr 1fr;gap:8px">
+          <label>Deadline<input id="te-deadline" type="date" value="${esc(t.deadline)}"></label>
+          <label>Time<input id="te-time" type="time" value="${esc(t.time)}"></label></div>
+        <div class="mute small" style="margin-top:6px">No time set: 11:59 pm.</div>`}
       <div style="font-size:12px;font-weight:600;color:var(--mute);margin-top:14px">Assign to</div>
       ${team.map(m => `<label class="chk"><input type="checkbox" data-as="${esc(m.name)}" ${assignees(t).includes(m.name) ? "checked" : ""}>
         <span>${esc(m.name)} <span class="mute small">· ${esc(m.role)}${m.email ? "" : " · no email"}</span></span></label>`).join("")}
@@ -333,8 +351,8 @@ function taskEditorHtml(d) {
 function readTaskForm() {
   const t = taskEdit.t;
   t.task = $("te-task").value.trim(); t.notes = $("te-notes").value.trim(); t.status = $("te-status").value;
-  if (t._mode === "range") { t.start = $("te-start").value; t.end = $("te-end").value; }
-  else if ($("te-deadline")) t.deadline = $("te-deadline").value;
+  if (t._mode === "range") { t.start = $("te-start").value; t.end = $("te-end").value; t.startTime = $("te-stime").value; t.endTime = $("te-etime").value; }
+  else if ($("te-deadline")) { t.deadline = $("te-deadline").value; t.time = $("te-time").value; }
   t.assignees = [...document.querySelectorAll("#te-form [data-as]")].filter(x => x.checked).map(x => x.dataset.as);
 }
 function rerenderTasks() { $("s-tasks").innerHTML = tasksHtml(lastData); }
@@ -805,9 +823,10 @@ $("main").addEventListener("submit", async ev => {
   readTaskForm();
   const t = taskEdit.t;
   if (!t.task) { toast("Give the task a name."); return; }
-  if (t._mode === "range" && t.end < t.start) { toast("End date is before the start date."); return; }
+  if (t._mode === "range" && (t.end + (t.endTime || DEF_DUE)) <= (t.start + (t.startTime || DEF_START))) { toast("The end is before the start."); return; }
   const o = {task: t.task, notes: t.notes, status: t.status, assignees: t.assignees};
-  if (t._mode === "range") { o.start = t.start; o.end = t.end; } else if (t.deadline) o.deadline = t.deadline;
+  if (t._mode === "range") { o.start = t.start; o.end = t.end; if (t.startTime) o.startTime = t.startTime; if (t.endTime) o.endTime = t.endTime; }
+  else if (t.deadline) { o.deadline = t.deadline; if (t.time) o.time = t.time; }
   const i = taskEdit.i, before = i >= 0 ? (lastData.tasks || [])[i].task : null;
   const btn = ev.target.querySelector("button[type=submit]"); btn.disabled = true; btn.textContent = "Saving…";
   try {
