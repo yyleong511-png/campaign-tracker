@@ -37,7 +37,7 @@ h2{font-size:17px;margin:22px 4px 8px}
 .mute{color:var(--mute)}
 .small{font-size:13px}
 header.top{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:0 4px 6px}
-header.top .acts{display:flex;gap:6px;align-items:center;flex:none}
+header.top .acts{display:flex;gap:4px;align-items:center;flex:none}
 button{font:inherit;font-weight:600;color:inherit;background:var(--panel);border:0;border-radius:14px;
   padding:10px 14px;cursor:pointer}
 button:active{opacity:.8}
@@ -142,7 +142,7 @@ header.top #updated,header.top #who{font-size:12px;white-space:nowrap;overflow:h
 .ed select{width:100%;font:inherit;font-size:16px;background:var(--bg);border:0;border-radius:14px;padding:12px 14px;margin-top:4px;color:var(--ink)}
 .row.mid .pill{white-space:normal;text-align:right;max-width:52%}
 .nm{white-space:nowrap}
-@media (max-width:380px){header.top h1{white-space:normal;overflow:visible}}
+@media (max-width:400px){header.top h1{white-space:normal;overflow:visible}}
 nav button{font-size:10.5px}
 .fchips{display:flex;gap:6px;overflow-x:auto;padding:2px 0 4px;margin:8px 0 2px;scrollbar-width:none}
 .fchips button{flex:none;font-size:12px;padding:8px 12px;background:var(--panel);min-height:36px}
@@ -169,10 +169,27 @@ nav button{font-size:10.5px}
 #viewer .vmsg{padding:24px;text-align:center;color:#C9CBD6}
 .tipbox{background:var(--warnbg);color:var(--warn);border-radius:14px;padding:12px 14px;font-size:13px;line-height:1.45;margin-top:12px}
 .tipbox b{color:#7A3410}
+.wrap{padding-left:calc(16px + env(safe-area-inset-left));padding-right:calc(16px + env(safe-area-inset-right))}
+nav{padding-left:calc(16px + env(safe-area-inset-left));padding-right:calc(16px + env(safe-area-inset-right))}
+#lock{min-height:100vh;min-height:100dvh;padding:calc(64px + env(safe-area-inset-top)) calc(24px + env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) calc(24px + env(safe-area-inset-left))}
+#viewer .vbar{padding-left:calc(10px + env(safe-area-inset-left));padding-right:calc(10px + env(safe-area-inset-right))}
+#viewer .vnav{padding-left:calc(10px + env(safe-area-inset-left));padding-right:calc(10px + env(safe-area-inset-right))}
+@media (max-width:440px){
+  header.top .acts .langbtn,header.top #refresh,header.top #profbtn{width:40px;height:40px}
+  header.top #profbtn{font-size:16px}
+  header.top h1{font-size:18px}
+  header.top .who{gap:10px}
+  header.top .logo{width:42px;height:42px;font-size:16px;border-radius:13px}
+  header.top .logo:after{left:13px;right:13px;bottom:7px;height:3px}
+}
+.langbtn{width:44px;height:44px;padding:0;border-radius:50%;font-size:13px;font-weight:700;color:var(--tintink);background:var(--panel);flex:none}
+#langlock{position:fixed;top:calc(12px + env(safe-area-inset-top));right:calc(12px + env(safe-area-inset-right));z-index:6;box-shadow:0 2px 10px rgba(23,26,43,.1)}
+html[lang="zh-Hans"] body{font-family:var(--font),"PingFang SC","Hiragino Sans GB","Noto Sans CJK SC","Microsoft YaHei",sans-serif}
 </style>
 </head>
 <body>
 
+<button id="langlock" class="langbtn" aria-label="Switch language" hidden>中</button>
 <div id="lock" hidden>
   <!-- Step 1: shared team password (first time on this phone) -->
   <form id="f-team" autocomplete="off" hidden>
@@ -240,6 +257,7 @@ nav button{font-size:10.5px}
       </div>
     </div>
     <div class="acts">
+      <button id="langbtn" class="langbtn" aria-label="Switch language">中</button>
       <button id="refresh" aria-label="Refresh"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
       <button id="profbtn" aria-label="Open profile">·</button>
     </div>
@@ -255,6 +273,7 @@ nav button{font-size:10.5px}
   <div class="vnav" id="v-nav" hidden><button id="v-prev" aria-label="Previous page">‹</button><span id="v-page">1 / 1</span><button id="v-next" aria-label="Next page">›</button></div>
 </div>
 
+<script src="i18n.js"></script>
 <script>
 "use strict";
 const KEY_STORE = "ct.key.v1";
@@ -284,14 +303,64 @@ async function decrypt(raw, enc) {
   return JSON.parse(new TextDecoder().decode(plain));
 }
 
+// ---- Language: English / 中文. Interface text only; what people type stays as typed. ----
+let LANG = (sget("ct.lang") === "zh") ? "zh" : "en";
+const ZH = window.__ZH || {};
+const EN_KEYS = window.__EN || {};
+function T(k, vars) {
+  let s = LANG === "zh" ? (ZH[k] ?? EN_KEYS[k] ?? k) : (EN_KEYS[k] ?? k);
+  if (vars) for (const v in vars) s = s.split("{" + v + "}").join(vars[v]);
+  return s;
+}
+const SKIP_TR = ".ttl,.fname,.txt,.note,.nm,.who2,.u,#v-title,#v-stage,#who,#title,#updated,#li-hello,#role-q,script,style,textarea,select#fl-brand option:not([value=''])";
+function trNode(n) {
+  if (n.nodeType === 3) {
+    const raw = n.nodeValue, key = raw.trim(); if (!key) return;
+    const p = n.parentElement; if (!p || p.closest(SKIP_TR)) return;
+    if (LANG === "zh") { if (ZH[key] !== undefined && n.__en === undefined) { n.__en = raw; n.nodeValue = raw.replace(key, ZH[key]); } }
+    else if (n.__en !== undefined) { n.nodeValue = n.__en; n.__en = undefined; }
+  } else if (n.nodeType === 1) {
+    if (n.matches && n.matches("script,style")) return;
+    for (const a of ["placeholder", "aria-label"]) {
+      if (!n.hasAttribute || !n.hasAttribute(a)) continue;
+      const store = "en" + a.replace("-", "");
+      if (LANG === "zh") { const v = n.getAttribute(a); if (ZH[v] !== undefined && n.dataset[store] === undefined) { n.dataset[store] = v; n.setAttribute(a, ZH[v]); } }
+      else if (n.dataset[store] !== undefined) { n.setAttribute(a, n.dataset[store]); delete n.dataset[store]; }
+    }
+    for (const c of n.childNodes) trNode(c);
+  }
+}
+let trBusy = false;
+function trAll() { trBusy = true; try { trNode(document.body); } finally { trBusy = false; } }
+new MutationObserver(ms => {
+  if (trBusy || LANG !== "zh") return; trBusy = true;
+  try { for (const m of ms) for (const n of m.addedNodes) trNode(n); } finally { trBusy = false; }
+}).observe(document.documentElement, {childList: true, subtree: true});
+function setLang(l) {
+  LANG = l; sset("ct.lang", l);
+  document.documentElement.lang = l === "zh" ? "zh-Hans" : "en";
+  for (const b of [$("langbtn"), $("langlock")]) { b.textContent = l === "zh" ? "EN" : "中"; b.setAttribute("aria-label", l === "zh" ? "Switch to English" : "切换到中文"); }
+  if (lastData && !$("app").hidden) { const tab = location.hash.slice(1); render(lastData); setWho(profile()); show(tab); }
+  else { const p = profile(); if (p) $("li-hello").textContent = T("Welcome back, {name}", {name: p.name}); }
+  if (!$("f-role").hidden && lastData) showRolePick(lastData);
+  trAll();
+}
 function fmtDate(s) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s || "")) return s || "";
   const d = new Date(s + "T00:00:00");
-  return d.toLocaleDateString("en-GB", {weekday: "short", day: "numeric", month: "short", year: "numeric"});
+  return LANG === "zh" ? d.toLocaleDateString("zh-CN", {year: "numeric", month: "long", day: "numeric", weekday: "short"})
+    : d.toLocaleDateString("en-GB", {weekday: "short", day: "numeric", month: "short", year: "numeric"});
+}
+function fmtShort(s) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s || "")) return s || "";
+  const d = new Date(s + "T00:00:00");
+  return LANG === "zh" ? d.toLocaleDateString("zh-CN", {month: "long", day: "numeric", weekday: "short"})
+    : d.toLocaleDateString("en-GB", {weekday: "short", day: "numeric", month: "short"});
 }
 function fmtWhen(iso) {
   const d = new Date(iso); if (isNaN(d)) return "";
-  return d.toLocaleString("en-GB", {day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true});
+  return LANG === "zh" ? d.toLocaleString("zh-CN", {month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false})
+    : d.toLocaleString("en-GB", {day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true});
 }
 function pill(status) {
   if (!status) return "";
@@ -303,7 +372,7 @@ function pill(status) {
   return `<span class="pill ${c}">${esc(status)}</span>`;
 }
 const meta = pairs => {
-  const m = pairs.filter(p => p[1]).map(p => `<span>${esc(p[0])}: ${esc(p[1])}</span>`).join("");
+  const m = pairs.filter(p => p[1]).map(p => `<span>${esc(T(p[0]))}${LANG === "zh" ? "：" : ": "}<span class="u">${esc(p[1])}</span></span>`).join("");
   return m ? `<div class="meta">${m}</div>` : "";
 };
 const note = t => t ? `<div class="note">${esc(t)}</div>` : "";
@@ -314,10 +383,10 @@ let taskEdit = null; // {i: index or -1, t: working copy}
 const assignees = t => Array.isArray(t.assignees) ? t.assignees : (t.owner ? [t.owner] : []);
 // Times default: deadline 23:59, range 09:00 → 23:59 (Malaysia time)
 const DEF_DUE = "23:59", DEF_START = "09:00";
-function fmtTime(hm) { const [h, m] = hm.split(":").map(Number); return ((h % 12) || 12) + ":" + String(m).padStart(2, "0") + (h < 12 ? " am" : " pm"); }
+function fmtTime(hm) { const [h, m] = hm.split(":").map(Number); return LANG === "zh" ? String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") : ((h % 12) || 12) + ":" + String(m).padStart(2, "0") + (h < 12 ? " am" : " pm"); }
 function whenText(t) {
   if (t.start && t.end) return fmtDate(t.start) + ", " + fmtTime(t.startTime || DEF_START) + " – " + fmtDate(t.end) + ", " + fmtTime(t.endTime || DEF_DUE);
-  if (t.deadline) return "Due " + fmtDate(t.deadline) + ", " + fmtTime(t.time || DEF_DUE);
+  if (t.deadline) return T("Due {when}", {when: fmtDate(t.deadline) + ", " + fmtTime(t.time || DEF_DUE)});
   return "";
 }
 function stamp(date, hm, plusMin) {
@@ -396,7 +465,7 @@ function taskEditorHtml(d) {
       <label>Task<input id="te-task" value="${esc(t.task)}" maxlength="120" required></label>
       <label>Notes<input id="te-notes" value="${esc(t.notes)}" maxlength="300"></label>
       <label>Status<select id="te-status" style="width:100%;font:inherit;font-size:16px;background:var(--bg);border:0;border-radius:14px;padding:12px 14px;margin-top:4px;color:var(--ink)">
-        ${TASK_STATUS.map(x => `<option ${x === (t.status || "Not started") ? "selected" : ""}>${x}</option>`).join("")}</select></label>
+        ${TASK_STATUS.map(x => `<option value="${x}" ${x === (t.status || "Not started") ? "selected" : ""}>${x}</option>`).join("")}</select></label>
       <div style="font-size:12px;font-weight:600;color:var(--mute);margin-top:14px">Dates</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
         <button type="button" data-mode="deadline" class="${mode === "deadline" ? "primary" : ""}" style="margin:0;${mode === "deadline" ? "background:var(--accent);color:#fff" : "background:var(--bg)"}">Deadline only</button>
@@ -441,8 +510,8 @@ function myTasksHtml(d) {
     items.push({key: b.next, kind: "Follow up", title: b.brand, when: fmtDate(b.next) + ", " + fmtTime(b.nextTime || DEF_DUE), tab: "brands"}); });
   if (!items.length) return "";
   items.sort((a, b) => a.key.localeCompare(b.key));
-  return `<h2>Coming up for you (${items.length})</h2><div class="card">${items.map(x => `<div class="mytask">
-    <div class="head"><div><span class="pill tint" style="font-size:11px;padding:2px 8px;margin-right:6px">${x.kind}</span><span style="font-weight:700">${esc(x.title)}</span></div>${x.right || ""}</div>
+  return `<h2>${T("Coming up for you ({n})", {n: items.length})}</h2><div class="card">${items.map(x => `<div class="mytask">
+    <div class="head"><div><span class="pill tint" style="font-size:11px;padding:2px 8px;margin-right:6px">${T(x.kind)}</span><span class="u" style="font-weight:700">${esc(x.title)}</span></div>${x.right || ""}</div>
     ${x.when ? `<div class="mute small" style="margin-top:4px">${esc(x.when)}</div>` : ""}
     <div class="mini"><button data-goto="${x.tab}">Open</button></div></div>`).join("")}</div>`;
 }
@@ -457,16 +526,16 @@ function offerEditorHtml() {
       <label>Intro<textarea id="of-intro" maxlength="300">${esc(o.intro)}</textarea></label>
       ${o.deliverables.map((x, i) => `<div style="border-top:1px solid var(--line);margin-top:14px;padding-top:4px">
         <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end">
-        <label>Item ${i + 1}<input data-of="item" data-i="${i}" value="${esc(x.item)}" maxlength="60"></label>
+        <label>${T("Item {n}", {n: i + 1})}<input data-of="item" data-i="${i}" value="${esc(x.item)}" maxlength="60"></label>
         <label>Format / quantity<input data-of="spec" data-i="${i}" value="${esc(x.spec)}" placeholder="e.g. 20 photos" maxlength="60"></label>
-        <button type="button" data-offer="rm" data-i="${i}" aria-label="Remove item ${i + 1}" style="background:var(--badbg);color:var(--bad);min-height:48px;padding:0 14px">×</button></div>
+        <button type="button" data-offer="rm" data-i="${i}" aria-label="${T("Remove item {n}", {n: i + 1})}" style="background:var(--badbg);color:var(--bad);min-height:48px;padding:0 14px">×</button></div>
         <label>Description<input data-of="desc" data-i="${i}" value="${esc(x.desc)}" maxlength="200"></label>
         <label>Ideal for<input data-of="idealFor" data-i="${i}" value="${esc(x.idealFor)}" maxlength="100"></label></div>`).join("")}
       <button class="wide" type="button" data-offer="add">+ Add item</button>
       <label>Estimated duration<input id="of-dur" value="${esc(o.duration)}" maxlength="60"></label>
       <div style="font-size:12px;font-weight:600;color:var(--mute);margin-top:16px">How we work</div>
       ${o.workflow.map((w, i) => `<div style="display:grid;grid-template-columns:0.8fr 1.6fr;gap:8px">
-        <label>Step ${i + 1}<input data-wf="step" data-i="${i}" value="${esc(w.step)}" maxlength="30"></label>
+        <label>${T("Step {n}", {n: i + 1})}<input data-wf="step" data-i="${i}" value="${esc(w.step)}" maxlength="30"></label>
         <label>What happens<input data-wf="desc" data-i="${i}" value="${esc(w.desc)}" maxlength="120"></label></div>`).join("")}
       <button class="wide primary" type="submit">Save</button>
       <button class="wide" type="button" data-offer="cancel">Cancel</button>
@@ -501,7 +570,7 @@ function recEditorHtml() {
         ? `<div style="font-size:12px;font-weight:600;color:var(--mute);margin-top:14px">${lab}</div>` + (lastData.team || []).filter(m => m.name).map(m => `<label class="chk"><input type="checkbox" data-pk="${k}" value="${esc(m.name)}" ${(r[k] || []).includes(m.name) ? "checked" : ""}>
             <span>${esc(m.name)} <span class="mute small">· ${esc(m.role)}${m.email ? "" : " · no email"}</span></span></label>`).join("")
         : Array.isArray(type)
-        ? `<label>${lab}<select data-k="${k}">${type.map(o => `<option ${o === (r[k] || type[0]) ? "selected" : ""}>${o}</option>`).join("")}</select></label>`
+        ? `<label>${lab}<select data-k="${k}">${type.map(o => `<option value="${o}" ${o === (r[k] || type[0]) ? "selected" : ""}>${o}</option>`).join("")}</select></label>`
         : type === "area" ? `<label>${lab}<textarea data-k="${k}" maxlength="600">${esc(r[k])}</textarea></label>`
         : `<label>${lab}<input data-k="${k}" type="${type}" value="${esc(r[k])}" ${type === "number" ? 'step="0.01" min="0" inputmode="decimal"' : ""} ${req ? "required" : ""} maxlength="120"></label>`).join("")}
       <button class="wide primary" type="submit">Save</button>
@@ -552,27 +621,27 @@ function filesHtml(d) {
           : `<button data-fopen="${i}" style="background:var(--accent);color:#fff">Download</button>`}
           ${canDel ? `<button data-fdel="${i}" style="color:var(--bad)">Delete</button>` : ""}</div></div>`;
     }).join("") : empty(files.length ? "No files match." : "No files yet. Upload your first proposal or deck.")}
-    ${files.length ? `<div class="mute small" style="margin:10px 4px">${files.length} item${files.length > 1 ? "s" : ""} · ${fmtSize(used)} stored. Files are encrypted; only the team can open them.</div>` : ""}`;
+    ${files.length ? `<div class="mute small" style="margin:10px 4px">${T(files.length > 1 ? "{n} items · {size} stored. Files are encrypted; only the team can open them." : "{n} item · {size} stored. Files are encrypted; only the team can open them.", {n: files.length, size: fmtSize(used)})}</div>` : ""}`;
 }
 function fileFormHtml(d) {
   const f = fileForm, brands = (d.outreach || []).map(b => b.brand).filter(Boolean);
   const drive = d.driveFolder || "https://drive.google.com/drive/my-drive";
   return `<h2>${f.big ? "Upload to Google Drive" : f.kind === "link" ? "Add a link" : "Upload file"}</h2>
     ${f.big ? `<div class="card">
-      <div class="frow"><div class="ftype">${esc(extOf(f.big.name))}</div><div><div class="fname">${esc(f.big.name)}</div><div class="mute small">${fmtSize(f.big.size)}, too big for the tracker (max ${fmtSize(FILE_MAX)})</div></div></div>
+      <div class="frow"><div class="ftype">${esc(extOf(f.big.name))}</div><div><div class="fname">${esc(f.big.name)}</div><div class="mute small">${T("{size}, too big for the tracker (max {max})", {size: fmtSize(f.big.size), max: fmtSize(FILE_MAX)})}</div></div></div>
       <ol style="margin:14px 0 0;padding-left:20px;line-height:1.55">
-        <li>Tap <b>Open Google Drive</b> and upload the file there${d.driveFolder ? " (our team folder)" : ""}.</li>
-        <li>In Drive, tap <b>⋮</b> on the file → <b>Share</b> → set access so the team can open it → <b>Copy link</b>.</li>
-        <li>Come back here, paste the link below and tap <b>Save link</b>.</li></ol>
+        <li>${T(d.driveFolder ? "@big1team" : "@big1")}</li>
+        <li>${T("@big2")}</li>
+        <li>${T("@big3")}</li></ol>
       <a class="wide primary" href="${esc(drive)}" target="_blank" rel="noopener" style="display:block;text-align:center;text-decoration:none;border-radius:14px;font-weight:600;padding:12px;margin-top:14px">Open Google Drive</a>
     </div>` : f.kind === "link" ? `<a href="${esc(drive)}" target="_blank" rel="noopener" class="small" style="display:inline-block;margin:0 4px 8px;color:var(--tintink);font-weight:600">${d.driveFolder ? "Open our team Drive folder ↗" : "Open Google Drive ↗"}</a>` : ""}
     <form class="card ed" id="fl-form" autocomplete="off" style="border:0">
       ${f.kind === "file" ? `<div class="frow"><div class="ftype">${esc(extOf(f.file.name))}</div><div><div class="fname">${esc(f.file.name)}</div><div class="mute small">${fmtSize(f.file.size)}</div></div></div>
-        ${isDeck(f.file.name) ? `<div class="tipbox"><b>Want to present this to clients?</b> Slides can't be shown full screen in the tracker. Export it as a PDF (PowerPoint, Keynote or Google Slides: Export / Download → PDF) and upload the PDF too. Animations and videos inside the slides won't carry over.</div>` : ""}` : ""}
+        ${isDeck(f.file.name) ? `<div class="tipbox">${T("@ppttip")}</div>` : ""}` : ""}
       ${f.kind === "link" ? `<label>Link<input id="fl-url" type="url" value="${esc(f.url)}" placeholder="https://drive.google.com/…" required></label>` : ""}
       <label>Name<input id="fl-name" value="${esc(f.name)}" maxlength="120" required></label>
-      <label>Category<select id="fl-cat">${FILE_CATS.map(c => `<option ${c === f.cat ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></label>
-      <label>Brand<select id="fl-brand"><option value="">None</option>${brands.map(b => `<option ${b === f.brand ? "selected" : ""}>${esc(b)}</option>`).join("")}</select></label>
+      <label>Category<select id="fl-cat">${FILE_CATS.map(c => `<option value="${esc(c)}" ${c === f.cat ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></label>
+      <label>Brand<select id="fl-brand"><option value="">None</option>${brands.map(b => `<option value="${esc(b)}" ${b === f.brand ? "selected" : ""}>${esc(b)}</option>`).join("")}</select></label>
       <label>Notes<input id="fl-notes" value="${esc(f.notes)}" maxlength="200"></label>
       <button class="wide primary" type="submit">${f.kind === "link" ? "Save link" : "Upload"}</button>
       <button class="wide" type="button" data-file="cancel">Cancel</button>
@@ -688,7 +757,7 @@ const money = n => { const v = Number(n || 0), a = Math.abs(v), dec = Number.isI
 
 function render(d) {
   $("title").textContent = d.title || "Campaign Tracker";
-  $("updated").textContent = d.updated ? "Updated " + fmtDate(d.updated) : "";
+  $("updated").textContent = d.updated ? T("Updated {date}", {date: fmtShort(d.updated)}) : "";
   const tasks = d.tasks || [], out = d.outreach || [], shoots = d.shoots || [], budget = d.budget || [], log = d.log || [];
   const open = tasks.filter(t => !/done|complete/i.test(t.status || "")).length;
   const today = new Date().toISOString().slice(0, 10);
@@ -713,7 +782,7 @@ function render(d) {
       const mineOnly = x => (x.by || "").trim().toLowerCase() === meName;
       const list = admin ? inbox : inbox.filter(mineOnly);
       if (!list.length) return "";
-      return `<h2>${admin ? "Waiting for review" : "Your updates, waiting to be sorted"} (${list.length})</h2>
+      return `<h2>${T(admin ? "Waiting for review ({n})" : "Your updates, waiting to be sorted ({n})", {n: list.length})}</h2>
     ${admin ? `<button class="wide primary" id="ov-review" style="margin-top:0">Review updates</button>` : ""}
     <div class="card">${[...list].reverse().map(x => `<div class="inbox-item" data-at="${esc(x.at)}"><div class="who2">${esc(x.by || "Someone")} · ${esc(fmtWhen(x.at))}</div>
       ${inboxEdit === x.at ? `<div class="ed" style="border:0;padding:0;margin:0"><textarea id="ib-text" maxlength="1000">${esc(x.text)}</textarea></div>
@@ -738,7 +807,7 @@ function render(d) {
       <div class="row" style="align-items:flex-start"><span class="num" style="margin-top:2px">${String(i + 1).padStart(2, "0")}</span><div class="grow">
         <div style="display:flex;justify-content:space-between;gap:10px"><span>${esc(x.item)}</span><span class="mute small" style="font-weight:500;text-align:right">${x.spec ? esc(x.spec) : "To be decided"}</span></div>
         ${x.desc ? `<div class="mute small" style="font-weight:400;margin-top:3px">${esc(x.desc)}</div>` : ""}
-        ${x.idealFor ? `<div class="small" style="font-weight:600;color:var(--tintink);margin-top:4px">Ideal for: ${esc(x.idealFor)}</div>` : ""}</div></div>`).join("")}
+        ${x.idealFor ? `<div class="small" style="font-weight:600;color:var(--tintink);margin-top:4px">${T("Ideal for:")} <span class="u">${esc(x.idealFor)}</span></div>` : ""}</div></div>`).join("")}
       ${offer.duration ? `<div class="row mid"><div class="k small">Estimated duration</div><span class="pill tint">${esc(offer.duration)}</span></div>` : ""}
       ${isAdmin() ? `<div class="mini" style="margin-top:12px"><button data-offer="edit">Edit</button></div>` : ""}</div>
     ${(offer.workflow || []).length ? `<h2>How we work</h2><div class="card">${offer.workflow.map((w, i) => `
@@ -780,7 +849,7 @@ function render(d) {
   show(location.hash.slice(1));
 }
 function logCard(l, extra) {
-  return `<div class="card"><div class="kicker">${esc(fmtDate(l.date))}</div><div style="margin-top:6px;white-space:pre-wrap">${esc(l.progress)}</div>
+  return `<div class="card"><div class="kicker">${esc(fmtDate(l.date))}</div><div class="u" style="margin-top:6px;white-space:pre-wrap">${esc(l.progress)}</div>
     ${l.followup ? `<div class="note"><span style="font-weight:700">To follow up</span><br>${esc(l.followup)}</div>` : ""}${extra || ""}</div>`;
 }
 function show(id) {
@@ -802,7 +871,7 @@ async function pinKey(pw, salt) {
   return crypto.subtle.deriveKey({name: "PBKDF2", hash: "SHA-256", salt, iterations: PIN_ITER}, base, {name: "AES-GCM", length: 256}, false, ["encrypt", "decrypt"]);
 }
 function showLock(form, msg) {
-  $("app").hidden = true; $("nav").hidden = true; $("lock").hidden = false;
+  $("app").hidden = true; $("nav").hidden = true; $("lock").hidden = false; $("langlock").hidden = false;
   ["f-team", "f-setup", "f-role", "f-login"].forEach(f => { $(f).hidden = f !== form; $(f).querySelector(".err").textContent = ""; });
   if (msg) $(form).querySelector(".err").textContent = msg;
   const first = $(form).querySelector("input"); if (first) first.focus({preventScroll: true});
@@ -813,13 +882,13 @@ function showApp(d) {
   render(d);
   const p = profile();
   setWho(p);
-  $("lock").hidden = true; $("app").hidden = false; $("nav").hidden = false;
+  $("lock").hidden = true; $("langlock").hidden = true; $("app").hidden = false; $("nav").hidden = false;
 }
 function lockNow() {
   rawKey = null; $("main").innerHTML = "";
   const p = profile();
   if (p) {
-    $("li-hello").textContent = "Welcome back, " + p.name;
+    $("li-hello").textContent = T("Welcome back, {name}", {name: p.name});
     $("li-biowrap").hidden = !(p.bio && window.PublicKeyCredential);
     showLock("f-login");
   } else showLock("f-team");
@@ -890,7 +959,7 @@ $("f-login").addEventListener("submit", async ev => {
 });
 
 // role picker: links this phone's login to a team member (no save needed), or fills an open slot
-function roleLabel(r) { return r ? (/^[aeiou]/i.test(r) ? "I am an " : "I am the ") + r : "That's me"; }
+function roleLabel(r) { return r ? (LANG === "zh" ? "我是 " + r : (/^[aeiou]/i.test(r) ? "I am an " : "I am the ") + r) : T("That's me"); }
 function showRolePick(d) {
   $("role-btns").innerHTML = (d.team || []).map((m, i) => m.admin ? "" : `<button type="button" data-pick="${i}" aria-pressed="false" style="margin-top:10px;display:block">
     ${esc(roleLabel(m.role))}${m.name ? `<span style="display:block;font-weight:500;font-size:13px;opacity:.85">${esc(m.name)}</span>` : ""}</button>`).join("");
@@ -906,7 +975,7 @@ function rolePick(i) {
   $("f-role").querySelector(".err").textContent = "";
   if (i !== null) {
     const m = (lastData.team || [])[i];
-    $("role-q").textContent = "You're the " + (m.role || "team member") + (m.name ? " (" + m.name + ")" : "") + "?";
+    $("role-q").textContent = T("You're the {role}{name}?", {role: m.role || T("team member"), name: m.name ? (LANG === "zh" ? "（" + m.name + "）" : " (" + m.name + ")") : ""});
     $("role-confirm").scrollIntoView({behavior: "smooth", block: "nearest"});
   }
 }
@@ -920,7 +989,7 @@ $("role-yes").addEventListener("click", async () => {
   const b = $("role-yes");
   const d = lastData, m = (d.team || [])[rolePicked]; if (!m) return;
   const p = profile(); const err = $("f-role").querySelector(".err");
-  if (m.name) { p.member = m.name; sset(PROFILE, JSON.stringify(p)); showApp(d); toast("Welcome, " + m.name + "!"); return; }
+  if (m.name) { p.member = m.name; sset(PROFILE, JSON.stringify(p)); showApp(d); toast(T("Welcome, {name}!", {name: m.name})); return; }
   b.disabled = true;
   const idx = rolePicked;
   try {
@@ -932,6 +1001,8 @@ $("role-yes").addEventListener("click", async () => {
 $("role-skip").addEventListener("click", () => showApp(lastData));
 $("li-reset").addEventListener("click", ev => { ev.preventDefault(); sdel(PROFILE); rawKey = null; showLock("f-team"); });
 
+for (const b of [$("langbtn"), $("langlock")]) b.addEventListener("click", () => setLang(LANG === "zh" ? "en" : "zh"));
+setLang(LANG);
 $("nav").querySelector(".in").innerHTML = TABS.map(([id, label]) => `<button data-tab="${id}">${label}</button>`).join("");
 $("nav").addEventListener("click", ev => {
   const b = ev.target.closest("button"); if (!b) return;
@@ -947,12 +1018,12 @@ $("profbtn").addEventListener("click", () => { history.replaceState(null, "", "#
 // Biometric unlock uses a passkey on this phone (WebAuthn PRF): the phone releases a secret only after
 // Face ID / fingerprint / screen lock, and that secret unwraps the team key. Nothing is stored unprotected.
 function toast(t) {
-  const el = $("toast"); el.textContent = t; el.hidden = false;
+  const el = $("toast"); el.textContent = T(t); el.hidden = false;
   clearTimeout(toast.t); toast.t = setTimeout(() => { el.hidden = true; }, 3500);
 }
 function saveProfile(p) { sset(PROFILE, JSON.stringify(p)); if (lastData) { render(lastData); } setWho(p); }
 function setWho(p) {
-  $("who").textContent = p ? "Hi " + p.name : "";
+  $("who").textContent = p ? T("Hi {name}", {name: p.name}) : "";
   $("profbtn").textContent = p && p.name ? p.name.trim().charAt(0).toUpperCase() : "·";
 }
 // ---- Admin: edit the team list and publish it to GitHub from this phone ----
@@ -1026,7 +1097,7 @@ function adminHtml(d) {
   const inbox = d.inbox || [];
   if (!reviewSel) { reviewSel = new Set(); reviewKnown = new Set(); }
   inbox.forEach(x => { if (!reviewKnown.has(x.at)) { reviewKnown.add(x.at); reviewSel.add(x.at); } }); // new updates start ticked
-  const review = `<h2>Review updates (${inbox.length})</h2>
+  const review = `<h2>${T("Review updates ({n})", {n: inbox.length})}</h2>
     ${inbox.length ? `<div class="card" id="rv-list">${inbox.map(x => `
       <div class="ed" data-at="${esc(x.at)}">
         <label class="chk" style="margin-top:0;align-items:flex-start"><input type="checkbox" data-rv ${reviewSel.has(x.at) ? "checked" : ""} style="margin-top:2px">
@@ -1052,7 +1123,7 @@ function adminHtml(d) {
     </div>` : ""}
     ${hasTok ? `<form class="card" id="ad-drive-form" autocomplete="off">
       <div style="font-weight:700">Team Google Drive folder</div>
-      <div class="mute small" style="margin-top:4px">Files over ${fmtSize(FILE_MAX)} go here. Paste the link of a shared Drive folder so everyone uploads to the same place.</div>
+      <div class="mute small" style="margin-top:4px">${T("Files over {max} go here. Paste the link of a shared Drive folder so everyone uploads to the same place.", {max: fmtSize(FILE_MAX)})}</div>
       <input id="ad-drive" type="url" placeholder="https://drive.google.com/drive/folders/…" value="${esc(d.driveFolder)}">
       <button class="wide" type="submit">Save folder link</button>
     </form>` : ""}
@@ -1381,7 +1452,7 @@ function profileHtml(d) {
     ${me && me.admin ? `<h2>Admin</h2>
     <div class="card">
       <div class="mute small">Review team updates and manage the team.</div>
-      <button class="wide primary" id="pf-admin">Open admin${(d.inbox || []).length ? ` · ${(d.inbox || []).length} to review` : ""}</button>
+      <button class="wide primary" id="pf-admin">${T("Open admin")}${(d.inbox || []).length ? " · " + T("{n} to review", {n: (d.inbox || []).length}) : ""}</button>
     </div>` : ""}
     <h2>Face ID / fingerprint</h2>
     <div class="card">
