@@ -152,6 +152,23 @@ nav button{font-size:10.5px}
 .ftype{flex:none;width:44px;height:44px;border-radius:12px;background:var(--tint);color:var(--tintink);font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;letter-spacing:.02em}
 .ftype.link{background:var(--pop);color:var(--ink)}
 .fname{font-weight:700;overflow-wrap:anywhere}
+#viewer{position:fixed;inset:0;background:#0B0B10;z-index:50;display:flex;flex-direction:column;color:#fff}
+#viewer .vbar{display:flex;align-items:center;gap:10px;padding:calc(8px + env(safe-area-inset-top)) 10px 8px;background:rgba(0,0,0,.55)}
+#viewer .vbar .vt{flex:1;min-width:0;font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#viewer .vbar button,#viewer .vnav button{background:rgba(255,255,255,.12);color:#fff;min-width:44px;min-height:44px;padding:0 12px;border-radius:12px}
+#viewer .vstage{flex:1;position:relative;overflow:auto;display:flex;align-items:center;justify-content:center;touch-action:pan-x pan-y pinch-zoom}
+#viewer .vstage.zoom{display:block}
+#viewer canvas,#viewer img,#viewer video{display:block;margin:auto;max-width:100%;max-height:100%}
+#viewer .vstage.zoom canvas{max-width:none;max-height:none}
+#viewer .vnav{display:flex;justify-content:center;align-items:center;gap:14px;padding:8px 10px calc(10px + env(safe-area-inset-bottom));background:rgba(0,0,0,.55);font-size:14px}
+@media (max-height:500px){
+  #viewer .vbar,#viewer .vnav{position:absolute;left:0;right:0;z-index:2;background:rgba(0,0,0,.35);transition:opacity .2s}
+  #viewer .vbar{top:0} #viewer .vnav{bottom:0}
+  #viewer.bare .vbar,#viewer.bare .vnav{opacity:0;pointer-events:none}
+}
+#viewer .vmsg{padding:24px;text-align:center;color:#C9CBD6}
+.tipbox{background:var(--warnbg);color:var(--warn);border-radius:14px;padding:12px 14px;font-size:13px;line-height:1.45;margin-top:12px}
+.tipbox b{color:#7A3410}
 </style>
 </head>
 <body>
@@ -232,6 +249,11 @@ nav button{font-size:10.5px}
 
 <nav id="nav" hidden><div class="in"></div></nav>
 <div id="toast" hidden role="status"></div>
+<div id="viewer" hidden role="dialog" aria-modal="true" aria-label="Present file">
+  <div class="vbar"><button id="v-close" aria-label="Close">✕</button><div class="vt" id="v-title"></div><button id="v-full" aria-label="Full screen">⤢</button></div>
+  <div class="vstage" id="v-stage"></div>
+  <div class="vnav" id="v-nav" hidden><button id="v-prev" aria-label="Previous page">‹</button><span id="v-page">1 / 1</span><button id="v-next" aria-label="Next page">›</button></div>
+</div>
 
 <script>
 "use strict";
@@ -494,7 +516,12 @@ function readRecForm() {
   return r;
 }
 // ---- Files: shared team files (encrypted with the team key) and links ----
-const FILE_MAX = 25 * 1024 * 1024;
+const FILE_MAX = 50 * 1024 * 1024;
+const isPdf = f => /pdf/i.test(f.mime || "") || /\.pdf$/i.test(f.orig || f.name || "");
+const isImg = f => /^image\//i.test(f.mime || "") || /\.(png|jpe?g|webp|gif)$/i.test(f.orig || f.name || "");
+const isVid = f => /^video\//i.test(f.mime || "") || /\.(mp4|mov|m4v|webm)$/i.test(f.orig || f.name || "");
+const isDeck = name => /\.(pptx?|key)$/i.test(name || "");
+const canPresent = f => f.kind === "file" && (isPdf(f) || isImg(f) || isVid(f));
 const FILE_CATS = ["Proposals", "Moodboards", "Contracts & quotes", "Photos & videos", "Other"];
 let fileFilter = {cat: "All", q: ""};
 let fileForm = null; // {kind: "file"|"link", file?, name, cat, brand, notes, url}
@@ -510,7 +537,7 @@ function filesHtml(d) {
   const used = files.filter(f => f.kind === "file").reduce((a, f) => a + (f.size || 0), 0);
   return `<h2>Files</h2>
     ${can ? `<div class="mini" style="margin-top:0"><button class="primary" data-file="pick" style="background:var(--accent);color:#fff">Upload file</button><button data-file="link">Add link</button></div>
-      <input type="file" id="fl-input" hidden accept=".pdf,.ppt,.pptx,.key,.doc,.docx,.xls,.xlsx,.csv,.txt,.png,.jpg,.jpeg,.webp,.heic,.gif,.zip">` : `<div class="note">Team updates are off, so uploads are off. Ask an admin.</div>`}
+      <input type="file" id="fl-input" hidden>` : `<div class="note">Team updates are off, so uploads are off. Ask an admin.</div>`}
     <input class="fsearch" id="fl-q" type="search" placeholder="Search files" value="${esc(fileFilter.q)}" aria-label="Search files">
     <div class="fchips" role="group" aria-label="Category">${["All", ...FILE_CATS].map(c => `<button data-fcat="${esc(c)}" aria-pressed="${fileFilter.cat === c}">${esc(c)}</button>`).join("")}</div>
     ${list.length ? list.map(([f, i]) => {
@@ -521,6 +548,7 @@ function filesHtml(d) {
         ${note(f.notes)}</div></div>
         <div class="mini" style="margin-top:12px">${f.kind === "link"
           ? `<a href="${esc(f.url)}" target="_blank" rel="noopener" style="flex:1;text-align:center;text-decoration:none;border-radius:14px;font-weight:600;padding:9px 8px;font-size:13px;background:var(--accent);color:#fff">Open link</a>`
+          : canPresent(f) ? `<button data-fshow="${i}" style="background:var(--accent);color:#fff">Present</button><button data-fopen="${i}">Download</button>`
           : `<button data-fopen="${i}" style="background:var(--accent);color:#fff">Download</button>`}
           ${canDel ? `<button data-fdel="${i}" style="color:var(--bad)">Delete</button>` : ""}</div></div>`;
     }).join("") : empty(files.length ? "No files match." : "No files yet. Upload your first proposal or deck.")}
@@ -528,9 +556,19 @@ function filesHtml(d) {
 }
 function fileFormHtml(d) {
   const f = fileForm, brands = (d.outreach || []).map(b => b.brand).filter(Boolean);
-  return `<h2>${f.kind === "link" ? "Add a link" : "Upload file"}</h2>
+  const drive = d.driveFolder || "https://drive.google.com/drive/my-drive";
+  return `<h2>${f.big ? "Upload to Google Drive" : f.kind === "link" ? "Add a link" : "Upload file"}</h2>
+    ${f.big ? `<div class="card">
+      <div class="frow"><div class="ftype">${esc(extOf(f.big.name))}</div><div><div class="fname">${esc(f.big.name)}</div><div class="mute small">${fmtSize(f.big.size)}, too big for the tracker (max ${fmtSize(FILE_MAX)})</div></div></div>
+      <ol style="margin:14px 0 0;padding-left:20px;line-height:1.55">
+        <li>Tap <b>Open Google Drive</b> and upload the file there${d.driveFolder ? " (our team folder)" : ""}.</li>
+        <li>In Drive, tap <b>⋮</b> on the file → <b>Share</b> → set access so the team can open it → <b>Copy link</b>.</li>
+        <li>Come back here, paste the link below and tap <b>Save link</b>.</li></ol>
+      <a class="wide primary" href="${esc(drive)}" target="_blank" rel="noopener" style="display:block;text-align:center;text-decoration:none;border-radius:14px;font-weight:600;padding:12px;margin-top:14px">Open Google Drive</a>
+    </div>` : f.kind === "link" ? `<a href="${esc(drive)}" target="_blank" rel="noopener" class="small" style="display:inline-block;margin:0 4px 8px;color:var(--tintink);font-weight:600">${d.driveFolder ? "Open our team Drive folder ↗" : "Open Google Drive ↗"}</a>` : ""}
     <form class="card ed" id="fl-form" autocomplete="off" style="border:0">
-      ${f.kind === "file" ? `<div class="frow"><div class="ftype">${esc(extOf(f.file.name))}</div><div><div class="fname">${esc(f.file.name)}</div><div class="mute small">${fmtSize(f.file.size)}</div></div></div>` : ""}
+      ${f.kind === "file" ? `<div class="frow"><div class="ftype">${esc(extOf(f.file.name))}</div><div><div class="fname">${esc(f.file.name)}</div><div class="mute small">${fmtSize(f.file.size)}</div></div></div>
+        ${isDeck(f.file.name) ? `<div class="tipbox"><b>Want to present this to clients?</b> Slides can't be shown full screen in the tracker. Export it as a PDF (PowerPoint, Keynote or Google Slides: Export / Download → PDF) and upload the PDF too. Animations and videos inside the slides won't carry over.</div>` : ""}` : ""}
       ${f.kind === "link" ? `<label>Link<input id="fl-url" type="url" value="${esc(f.url)}" placeholder="https://drive.google.com/…" required></label>` : ""}
       <label>Name<input id="fl-name" value="${esc(f.name)}" maxlength="120" required></label>
       <label>Category<select id="fl-cat">${FILE_CATS.map(c => `<option ${c === f.cat ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></label>
@@ -546,13 +584,99 @@ function readFileForm() {
   if ($("fl-url")) fileForm.url = $("fl-url").value.trim();
 }
 function rerenderFiles() { $("s-files").innerHTML = filesHtml(lastData); }
-async function downloadFile(f) {
+async function fileBytes(f) {
   const urls = [`https://raw.githubusercontent.com/${REPO}/main/${f.path}?t=${Date.now()}`, f.path + "?t=" + Date.now()];
   let buf = null;
   for (const u of urls) { try { const r = await fetch(u, {cache: "no-store"}); if (r.ok) { buf = new Uint8Array(await r.arrayBuffer()); break; } } catch (e) {} }
   if (!buf) throw new Error("notfound");
   const key = await teamKey(["decrypt"]);
-  const plain = await crypto.subtle.decrypt({name: "AES-GCM", iv: buf.subarray(0, 12)}, key, buf.subarray(12));
+  return crypto.subtle.decrypt({name: "AES-GCM", iv: buf.subarray(0, 12)}, key, buf.subarray(12));
+}
+// full-screen viewer for PDF, images and video
+const V = {doc: null, task: null, page: 1, url: null, zoom: false, rendering: false, f: null};
+let pdfjsLib = null;
+async function loadPdfJs() {
+  if (!pdfjsLib) { pdfjsLib = await import("./lib/pdfjs/pdf.min.mjs"); pdfjsLib.GlobalWorkerOptions.workerSrc = new URL("lib/pdfjs/pdf.worker.min.mjs", location.href).href; }
+  return pdfjsLib;
+}
+async function renderPage() {
+  if (!V.doc || V.rendering) return;
+  V.rendering = true;
+  try {
+    const page = await V.doc.getPage(V.page), stage = $("v-stage");
+    const base = page.getViewport({scale: 1});
+    const fit = Math.min(stage.clientWidth / base.width, stage.clientHeight / base.height) * (V.zoom ? 2.2 : 1);
+    const dpr = Math.min(window.devicePixelRatio || 1, 3), vp = page.getViewport({scale: fit * dpr});
+    const c = document.createElement("canvas"); c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+    c.style.width = Math.floor(vp.width / dpr) + "px"; c.style.height = Math.floor(vp.height / dpr) + "px";
+    await page.render({canvasContext: c.getContext("2d"), viewport: vp}).promise;
+    stage.classList.toggle("zoom", V.zoom); stage.innerHTML = ""; stage.appendChild(c);
+    $("v-page").textContent = V.page + " / " + V.doc.numPages;
+    $("v-prev").disabled = V.page <= 1; $("v-next").disabled = V.page >= V.doc.numPages;
+  } finally { V.rendering = false; }
+}
+function goPage(n) { if (!V.doc) return; n = Math.max(1, Math.min(V.doc.numPages, n)); if (n !== V.page) { V.page = n; V.zoom = false; renderPage(); } }
+async function presentFile(f) {
+  V.f = f; V.page = 1; V.zoom = false;
+  $("v-title").textContent = f.name; $("v-nav").hidden = true;
+  const stage = $("v-stage"); stage.classList.remove("zoom"); stage.innerHTML = `<div class="vmsg">Opening…</div>`;
+  $("viewer").hidden = false; document.body.style.overflow = "hidden";
+  try {
+    const plain = await fileBytes(f);
+    if (isPdf(f)) {
+      const lib = await loadPdfJs();
+      V.task = lib.getDocument({data: new Uint8Array(plain)}); V.doc = await V.task.promise;
+      $("v-nav").hidden = V.doc.numPages < 2; await renderPage();
+      const p1 = (await V.doc.getPage(1)).getViewport({scale: 1});
+      if (p1.width > p1.height && innerHeight > innerWidth) toast("Tip: turn your phone sideways to fill the screen.");
+    } else {
+      V.url = URL.createObjectURL(new Blob([plain], {type: f.mime || (isVid(f) ? "video/mp4" : "image/jpeg")}));
+      stage.innerHTML = isVid(f) ? `<video src="${V.url}" controls autoplay playsinline></video>` : `<img src="${V.url}" alt="${esc(f.name)}">`;
+    }
+  } catch (e) {
+    stage.innerHTML = `<div class="vmsg">${e.message === "notfound" ? "This file isn't ready yet. Try again in a minute." : "Couldn't open this file. Try Download instead."}</div>`;
+  }
+}
+function closeViewer() {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  $("viewer").hidden = true; document.body.style.overflow = ""; $("v-stage").innerHTML = "";
+  try { if (V.task) V.task.destroy(); } catch (e) {}
+  V.task = null; V.doc = null; $("viewer").classList.remove("bare");
+  if (V.url) { URL.revokeObjectURL(V.url); V.url = null; }
+}
+$("v-close").addEventListener("click", closeViewer);
+$("v-prev").addEventListener("click", () => goPage(V.page - 1));
+$("v-next").addEventListener("click", () => goPage(V.page + 1));
+$("v-full").addEventListener("click", () => {
+  const el = $("viewer");
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  else if (el.requestFullscreen) el.requestFullscreen().catch(() => toast("Turn your phone sideways for a bigger view."));
+  else toast("Turn your phone sideways for a bigger view.");
+});
+(() => {
+  const st = $("v-stage"); let x0 = null, y0 = null, t0 = 0, lastTap = 0, tapT = null;
+  st.addEventListener("touchstart", e => { if (e.touches.length === 1) { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; t0 = Date.now(); } else x0 = null; }, {passive: true});
+  st.addEventListener("touchend", e => {
+    if (x0 === null || !V.doc) return;
+    const t = e.changedTouches[0], dx = t.clientX - x0, dy = t.clientY - y0;
+    if (!V.zoom && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) { goPage(V.page + (dx < 0 ? 1 : -1)); x0 = null; return; }
+    if (Math.abs(dx) < 10 && Math.abs(dy) < 10 && Date.now() - t0 < 300) {
+      if (Date.now() - lastTap < 300) { clearTimeout(tapT); V.zoom = !V.zoom; renderPage(); lastTap = 0; }
+      else { lastTap = Date.now(); tapT = setTimeout(() => $("viewer").classList.toggle("bare"), 320); }
+    }
+    x0 = null;
+  });
+  st.addEventListener("dblclick", () => { if (V.doc) { V.zoom = !V.zoom; renderPage(); } });
+  document.addEventListener("keydown", e => {
+    if ($("viewer").hidden) return;
+    if (e.key === "Escape") closeViewer();
+    else if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") { e.preventDefault(); goPage(V.page + 1); }
+    else if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); goPage(V.page - 1); }
+  });
+  let rt = null; window.addEventListener("resize", () => { if (!$("viewer").hidden && V.doc) { clearTimeout(rt); rt = setTimeout(renderPage, 150); } });
+})();
+async function downloadFile(f) {
+  const plain = await fileBytes(f);
   const url = URL.createObjectURL(new Blob([plain], {type: f.mime || "application/octet-stream"}));
   const a = document.createElement("a"); a.href = url; a.download = f.name.includes(".") ? f.name : f.name + "." + extOf(f.orig || "").toLowerCase();
   document.body.appendChild(a); a.click(); a.remove();
@@ -926,6 +1050,12 @@ function adminHtml(d) {
       <div class="mute small" style="margin-top:4px">${d.submitToken ? "On. Everyone can use the box on Home." : "Off. Turn on to let everyone use the box on Home. Your GitHub token is stored inside the encrypted tracker, so anyone with the team password can use it."}</div>
       <button class="wide ${d.submitToken ? "" : "primary"}" data-act="${d.submitToken ? "subOff" : "subOn"}">${d.submitToken ? "Turn off" : "Turn on"}</button>
     </div>` : ""}
+    ${hasTok ? `<form class="card" id="ad-drive-form" autocomplete="off">
+      <div style="font-weight:700">Team Google Drive folder</div>
+      <div class="mute small" style="margin-top:4px">Files over ${fmtSize(FILE_MAX)} go here. Paste the link of a shared Drive folder so everyone uploads to the same place.</div>
+      <input id="ad-drive" type="url" placeholder="https://drive.google.com/drive/folders/…" value="${esc(d.driveFolder)}">
+      <button class="wide" type="submit">Save folder link</button>
+    </form>` : ""}
     <div class="card" id="ad-list">${draft.map((m, i) => `
       <div class="ed" data-i="${i}">
         <label>Name<input data-f="name" value="${esc(m.name)}" placeholder="Full name" maxlength="40"></label>
@@ -971,6 +1101,7 @@ $("main").addEventListener("click", async ev => {
     if (v === "link") { fileForm = {kind: "link", url: "", name: "", cat: "Photos & videos", brand: "", notes: ""}; rerenderFiles(); window.scrollTo(0, 0); return; }
     if (v === "cancel") { fileForm = null; rerenderFiles(); return; }
   }
+  if (b.dataset.fshow !== undefined) { const f = (lastData.files || [])[+b.dataset.fshow]; if (f) presentFile(f); return; }
   if (b.dataset.fopen !== undefined) {
     const f = (lastData.files || [])[+b.dataset.fopen]; if (!f) return;
     b.disabled = true; const t = b.textContent; b.textContent = "Opening…";
@@ -1153,11 +1284,21 @@ $("main").addEventListener("submit", async ev => {
     btn.disabled = false; btn.textContent = "Save";
   }
 }, true);
+$("main").addEventListener("submit", async ev => {
+  if (ev.target.id !== "ad-drive-form") return;
+  ev.preventDefault(); ev.stopImmediatePropagation(); syncDraft();
+  const v = $("ad-drive").value.trim();
+  if (v && !/^https:\/\/(drive|docs)\.google\.com\//i.test(v)) { toast("Paste a Google Drive folder link."); return; }
+  const btn = ev.target.querySelector("button"); btn.disabled = true;
+  try { const d = await publish(x => { if (v) x.driveFolder = v; else delete x.driveFolder; }, "Set team Drive folder"); showApp(d); history.replaceState(null, "", "#admin"); show("admin"); toast("Saved."); }
+  catch (e) { toast("Could not save. Try again."); btn.disabled = false; }
+}, true);
 $("main").addEventListener("change", ev => {
   if (ev.target.id !== "fl-input") return;
   const file = ev.target.files && ev.target.files[0]; if (!file) return;
-  if (file.size > FILE_MAX) { toast("That file is over 25 MB. Upload it to Google Drive and use Add link."); return; }
-  fileForm = {kind: "file", file, name: file.name, cat: /\.(pptx?|key|pdf)$/i.test(file.name) ? "Proposals" : /\.(png|jpe?g|webp|heic|gif)$/i.test(file.name) ? "Photos & videos" : "Other", brand: "", notes: ""};
+  const cat = /\.(pptx?|key|pdf)$/i.test(file.name) ? "Proposals" : /\.(png|jpe?g|webp|heic|gif|mp4|mov|m4v|webm)$/i.test(file.name) ? "Photos & videos" : "Other";
+  if (file.size > FILE_MAX) fileForm = {kind: "link", big: {name: file.name, size: file.size}, url: "", name: file.name, cat, brand: "", notes: ""};
+  else fileForm = {kind: "file", file, name: file.name, cat, brand: "", notes: ""};
   rerenderFiles(); window.scrollTo(0, 0);
 });
 $("main").addEventListener("input", ev => {
