@@ -77,7 +77,7 @@ button:disabled{opacity:.6}
 .stats.money .stat b{font-size:17px}
 nav{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:center;
   padding:0 16px calc(14px + env(safe-area-inset-bottom))}
-nav .in{display:grid;grid-template-columns:repeat(6,1fr);gap:2px;width:100%;max-width:688px;background:var(--panel);
+nav .in{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;width:100%;max-width:688px;background:var(--panel);
   border-radius:24px;padding:6px;box-shadow:0 6px 20px rgba(23,26,43,.12)}
 nav button{height:48px;border-radius:18px;background:none;padding:0;font-size:11px;font-weight:600;color:var(--mute)}
 nav button[aria-current="true"]{background:var(--tint);color:var(--tintink);font-weight:700}
@@ -143,6 +143,15 @@ header.top #updated,header.top #who{font-size:12px;white-space:nowrap;overflow:h
 .row.mid .pill{white-space:normal;text-align:right;max-width:52%}
 .nm{white-space:nowrap}
 @media (max-width:380px){header.top h1{white-space:normal;overflow:visible}}
+nav button{font-size:10.5px}
+.fchips{display:flex;gap:6px;overflow-x:auto;padding:2px 0 4px;margin:8px 0 2px;scrollbar-width:none}
+.fchips button{flex:none;font-size:12px;padding:8px 12px;background:var(--panel);min-height:36px}
+.fchips button[aria-pressed="true"]{background:var(--accent);color:#fff}
+.fsearch{width:100%;font:inherit;font-size:16px;background:var(--panel);border:0;border-radius:14px;padding:12px 14px;margin-top:6px;color:var(--ink)}
+.frow{display:flex;gap:12px;align-items:flex-start}
+.ftype{flex:none;width:44px;height:44px;border-radius:12px;background:var(--tint);color:var(--tintink);font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;letter-spacing:.02em}
+.ftype.link{background:var(--pop);color:var(--ink)}
+.fname{font-weight:700;overflow-wrap:anywhere}
 </style>
 </head>
 <body>
@@ -227,7 +236,7 @@ header.top #updated,header.top #who{font-size:12px;white-space:nowrap;overflow:h
 <script>
 "use strict";
 const KEY_STORE = "ct.key.v1";
-const TABS = [["overview","Overview"],["tasks","Tasks"],["brands","Brands"],["shoots","Shoots"],["budget","Budget"],["log","Log"]];
+const TABS = [["overview","Home"],["tasks","Tasks"],["brands","Brands"],["shoots","Shoots"],["budget","Budget"],["files","Files"],["log","Log"]];
 const $ = id => document.getElementById(id);
 const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
@@ -484,6 +493,71 @@ function readRecForm() {
   document.querySelectorAll("#re-form [data-pk]").forEach(el => { if (el.checked) (r[el.dataset.pk] = r[el.dataset.pk] || []).push(el.value); });
   return r;
 }
+// ---- Files: shared team files (encrypted with the team key) and links ----
+const FILE_MAX = 25 * 1024 * 1024;
+const FILE_CATS = ["Proposals", "Moodboards", "Contracts & quotes", "Photos & videos", "Other"];
+let fileFilter = {cat: "All", q: ""};
+let fileForm = null; // {kind: "file"|"link", file?, name, cat, brand, notes, url}
+function fmtSize(n) { return n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB"; }
+function extOf(name) { const m = /\.([a-z0-9]{1,5})$/i.exec(name || ""); return m ? m[1].toUpperCase() : "FILE"; }
+function bytesToB64(u8) { let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); }
+function filesHtml(d) {
+  if (fileForm) return fileFormHtml(d);
+  const files = d.files || [], me = ((profile() || {}).name || "").trim().toLowerCase(), admin = isAdmin(), can = canWrite(d);
+  const q = fileFilter.q.trim().toLowerCase();
+  const list = files.map((f, i) => [f, i]).filter(([f]) => (fileFilter.cat === "All" || f.cat === fileFilter.cat)
+    && (!q || [f.name, f.brand, f.notes, f.by, f.cat].join(" ").toLowerCase().includes(q))).reverse();
+  const used = files.filter(f => f.kind === "file").reduce((a, f) => a + (f.size || 0), 0);
+  return `<h2>Files</h2>
+    ${can ? `<div class="mini" style="margin-top:0"><button class="primary" data-file="pick" style="background:var(--accent);color:#fff">Upload file</button><button data-file="link">Add link</button></div>
+      <input type="file" id="fl-input" hidden accept=".pdf,.ppt,.pptx,.key,.doc,.docx,.xls,.xlsx,.csv,.txt,.png,.jpg,.jpeg,.webp,.heic,.gif,.zip">` : `<div class="note">Team updates are off, so uploads are off. Ask an admin.</div>`}
+    <input class="fsearch" id="fl-q" type="search" placeholder="Search files" value="${esc(fileFilter.q)}" aria-label="Search files">
+    <div class="fchips" role="group" aria-label="Category">${["All", ...FILE_CATS].map(c => `<button data-fcat="${esc(c)}" aria-pressed="${fileFilter.cat === c}">${esc(c)}</button>`).join("")}</div>
+    ${list.length ? list.map(([f, i]) => {
+      const mine = (f.by || "").trim().toLowerCase() === me, canDel = can && (admin || mine);
+      return `<div class="card"><div class="frow"><div class="ftype ${f.kind === "link" ? "link" : ""}">${f.kind === "link" ? "LINK" : esc(extOf(f.name))}</div>
+        <div style="flex:1;min-width:0"><div class="fname">${esc(f.name)}</div>
+        <div class="meta" style="margin-top:4px">${[f.cat, f.brand, f.kind === "file" ? fmtSize(f.size) : "", f.by, f.at ? fmtDate(new Date(Date.parse(f.at) + 8 * 3600e3).toISOString().slice(0, 10)) : ""].filter(Boolean).map(x => `<span>${esc(x)}</span>`).join("")}</div>
+        ${note(f.notes)}</div></div>
+        <div class="mini" style="margin-top:12px">${f.kind === "link"
+          ? `<a href="${esc(f.url)}" target="_blank" rel="noopener" style="flex:1;text-align:center;text-decoration:none;border-radius:14px;font-weight:600;padding:9px 8px;font-size:13px;background:var(--accent);color:#fff">Open link</a>`
+          : `<button data-fopen="${i}" style="background:var(--accent);color:#fff">Download</button>`}
+          ${canDel ? `<button data-fdel="${i}" style="color:var(--bad)">Delete</button>` : ""}</div></div>`;
+    }).join("") : empty(files.length ? "No files match." : "No files yet. Upload your first proposal or deck.")}
+    ${files.length ? `<div class="mute small" style="margin:10px 4px">${files.length} item${files.length > 1 ? "s" : ""} · ${fmtSize(used)} stored. Files are encrypted; only the team can open them.</div>` : ""}`;
+}
+function fileFormHtml(d) {
+  const f = fileForm, brands = (d.outreach || []).map(b => b.brand).filter(Boolean);
+  return `<h2>${f.kind === "link" ? "Add a link" : "Upload file"}</h2>
+    <form class="card ed" id="fl-form" autocomplete="off" style="border:0">
+      ${f.kind === "file" ? `<div class="frow"><div class="ftype">${esc(extOf(f.file.name))}</div><div><div class="fname">${esc(f.file.name)}</div><div class="mute small">${fmtSize(f.file.size)}</div></div></div>` : ""}
+      ${f.kind === "link" ? `<label>Link<input id="fl-url" type="url" value="${esc(f.url)}" placeholder="https://drive.google.com/…" required></label>` : ""}
+      <label>Name<input id="fl-name" value="${esc(f.name)}" maxlength="120" required></label>
+      <label>Category<select id="fl-cat">${FILE_CATS.map(c => `<option ${c === f.cat ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></label>
+      <label>Brand<select id="fl-brand"><option value="">None</option>${brands.map(b => `<option ${b === f.brand ? "selected" : ""}>${esc(b)}</option>`).join("")}</select></label>
+      <label>Notes<input id="fl-notes" value="${esc(f.notes)}" maxlength="200"></label>
+      <button class="wide primary" type="submit">${f.kind === "link" ? "Save link" : "Upload"}</button>
+      <button class="wide" type="button" data-file="cancel">Cancel</button>
+      <div class="mute small" id="fl-status" style="margin-top:8px"></div>
+    </form>`;
+}
+function readFileForm() {
+  fileForm.name = $("fl-name").value.trim(); fileForm.cat = $("fl-cat").value; fileForm.brand = $("fl-brand").value; fileForm.notes = $("fl-notes").value.trim();
+  if ($("fl-url")) fileForm.url = $("fl-url").value.trim();
+}
+function rerenderFiles() { $("s-files").innerHTML = filesHtml(lastData); }
+async function downloadFile(f) {
+  const urls = [`https://raw.githubusercontent.com/${REPO}/main/${f.path}?t=${Date.now()}`, f.path + "?t=" + Date.now()];
+  let buf = null;
+  for (const u of urls) { try { const r = await fetch(u, {cache: "no-store"}); if (r.ok) { buf = new Uint8Array(await r.arrayBuffer()); break; } } catch (e) {} }
+  if (!buf) throw new Error("notfound");
+  const key = await teamKey(["decrypt"]);
+  const plain = await crypto.subtle.decrypt({name: "AES-GCM", iv: buf.subarray(0, 12)}, key, buf.subarray(12));
+  const url = URL.createObjectURL(new Blob([plain], {type: f.mime || "application/octet-stream"}));
+  const a = document.createElement("a"); a.href = url; a.download = f.name.includes(".") ? f.name : f.name + "." + extOf(f.orig || "").toLowerCase();
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
 function rerenderTasks() { $("s-tasks").innerHTML = tasksHtml(lastData); }
 const money = n => { const v = Number(n || 0), a = Math.abs(v), dec = Number.isInteger(a) ? 0 : 2;
   return (v < 0 ? "−" : "") + "RM " + a.toLocaleString("en-MY", {minimumFractionDigits: dec, maximumFractionDigits: dec}); };
@@ -573,6 +647,7 @@ function render(d) {
     <span class="pill ${/income/i.test(x.type || "") ? "good" : "bad"}">${/income/i.test(x.type || "") ? "+" : "−"} ${esc(money(x.amount))}</span></div>
     ${meta([["Date", fmtDate(x.date)], ["Handled by", x.by]])}${note(x.notes)}${editBtn("budget", i)}</div>`).join("") : empty("No income or expenses recorded yet."));
 
+  s.files = filesHtml(d);
   s.log = (recEdit && recEdit.col === "log") ? recEditorHtml() : `<h2>Daily Update Log</h2>${addBtn("log")}` + (log.length ? log.map((l, i) => [l, i]).reverse().map(([l, i]) => logCard(l, editBtn("log", i))).join("") : empty("No updates yet."));
 
   s.profile = profileHtml(d);
@@ -780,6 +855,18 @@ async function saveToken(tok) {
   const ct = await crypto.subtle.encrypt({name: "AES-GCM", iv}, await teamKey(["encrypt"]), new TextEncoder().encode(tok));
   p.gh = {iv: b64(iv), ct: b64(ct)}; sset(PROFILE, JSON.stringify(p));
 }
+// GitHub contents API on any path (files are stored encrypted under files/)
+async function ghPath(tok, method, path, body) {
+  const r = await fetch(`https://api.github.com/repos/${REPO}/contents/${path}`, {
+    method, cache: "no-store",
+    headers: {"Authorization": "Bearer " + tok, "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"},
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if (r.status === 401 || r.status === 403) throw new Error("auth");
+  if (method === "DELETE" && (r.status === 404 || r.status === 422)) return null; // already gone
+  if (!r.ok) throw new Error("gh" + r.status);
+  return r.json();
+}
 async function gh(tok, method, body) {
   const r = await fetch(`https://api.github.com/repos/${REPO}/contents/${DATA_PATH}` + (method === "GET" ? "?ref=main&t=" + Date.now() : ""), {
     method, cache: "no-store",
@@ -836,7 +923,7 @@ function adminHtml(d) {
     </form>`}
     ${hasTok ? `<div class="card">
       <div style="font-weight:700">Team updates</div>
-      <div class="mute small" style="margin-top:4px">${d.submitToken ? "On. Everyone can use the box on Overview." : "Off. Turn on to let everyone use the box on Overview. Your GitHub token is stored inside the encrypted tracker, so anyone with the team password can use it."}</div>
+      <div class="mute small" style="margin-top:4px">${d.submitToken ? "On. Everyone can use the box on Home." : "Off. Turn on to let everyone use the box on Home. Your GitHub token is stored inside the encrypted tracker, so anyone with the team password can use it."}</div>
       <button class="wide ${d.submitToken ? "" : "primary"}" data-act="${d.submitToken ? "subOff" : "subOn"}">${d.submitToken ? "Turn off" : "Turn on"}</button>
     </div>` : ""}
     <div class="card" id="ad-list">${draft.map((m, i) => `
@@ -876,6 +963,30 @@ $("main").addEventListener("click", async ev => {
     else if (v === "cancel") offerEdit = null;
     else { readOffer(); if (v === "add") offerEdit.deliverables.push({item: "", spec: ""}); if (v === "rm") offerEdit.deliverables.splice(+b.dataset.i, 1); }
     render(lastData); show("overview"); return;
+  }
+  if (b.dataset.fcat) { fileFilter.cat = b.dataset.fcat; rerenderFiles(); return; }
+  if (b.dataset.file) {
+    const v = b.dataset.file;
+    if (v === "pick") { $("fl-input").value = ""; $("fl-input").click(); return; }
+    if (v === "link") { fileForm = {kind: "link", url: "", name: "", cat: "Photos & videos", brand: "", notes: ""}; rerenderFiles(); window.scrollTo(0, 0); return; }
+    if (v === "cancel") { fileForm = null; rerenderFiles(); return; }
+  }
+  if (b.dataset.fopen !== undefined) {
+    const f = (lastData.files || [])[+b.dataset.fopen]; if (!f) return;
+    b.disabled = true; const t = b.textContent; b.textContent = "Opening…";
+    try { await downloadFile(f); } catch (e) { toast(e.message === "notfound" ? "File not ready yet. Try again in a minute." : "Could not open the file."); }
+    b.disabled = false; b.textContent = t; return;
+  }
+  if (b.dataset.fdel !== undefined) {
+    if (!b.dataset.sure) { b.dataset.sure = "1"; b.textContent = "Tap again to delete"; return; }
+    const i = +b.dataset.fdel, f = (lastData.files || [])[i]; if (!f) return;
+    b.disabled = true;
+    try {
+      if (f.kind === "file" && f.sha) { const tok = await getToken(); if (!tok) throw new Error("notoken"); await ghPath(tok, "DELETE", f.path, {message: "Delete file: " + f.name, sha: f.sha, branch: "main"}); }
+      const d = await publish(x => { x.files = (x.files || []).filter(y => y.id !== f.id); }, "Remove file: " + f.name);
+      showApp(d); show("files"); toast("Deleted.");
+    } catch (e) { toast("Could not delete. Try again."); b.disabled = false; }
+    return;
   }
   if (b.dataset.goto) { history.replaceState(null, "", "#" + b.dataset.goto); show(b.dataset.goto); return; }
   if (b.dataset.tstatus !== undefined) {
@@ -1040,6 +1151,47 @@ $("main").addEventListener("submit", async ev => {
   } catch (e) {
     toast(e.message === "moved" ? "The task list changed. Tap Refresh and try again." : e.message === "notoken" ? "Connect GitHub in Admin first." : "Could not save. Try again.");
     btn.disabled = false; btn.textContent = "Save";
+  }
+}, true);
+$("main").addEventListener("change", ev => {
+  if (ev.target.id !== "fl-input") return;
+  const file = ev.target.files && ev.target.files[0]; if (!file) return;
+  if (file.size > FILE_MAX) { toast("That file is over 25 MB. Upload it to Google Drive and use Add link."); return; }
+  fileForm = {kind: "file", file, name: file.name, cat: /\.(pptx?|key|pdf)$/i.test(file.name) ? "Proposals" : /\.(png|jpe?g|webp|heic|gif)$/i.test(file.name) ? "Photos & videos" : "Other", brand: "", notes: ""};
+  rerenderFiles(); window.scrollTo(0, 0);
+});
+$("main").addEventListener("input", ev => {
+  if (ev.target.id !== "fl-q") return;
+  fileFilter.q = ev.target.value;
+  const pos = ev.target.selectionStart; rerenderFiles(); const el = $("fl-q"); el.focus(); try { el.setSelectionRange(pos, pos); } catch (e) {}
+});
+$("main").addEventListener("submit", async ev => {
+  if (ev.target.id !== "fl-form") return;
+  ev.preventDefault(); ev.stopImmediatePropagation(); readFileForm();
+  const f = fileForm, btn = ev.target.querySelector("button[type=submit]"), st = $("fl-status");
+  if (!f.name) { toast("Give it a name."); return; }
+  if (f.kind === "link" && !/^https?:\/\//i.test(f.url)) { toast("Paste a full link starting with https://"); return; }
+  btn.disabled = true;
+  const by = (profile() || {}).name || "", id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  const meta = {id, kind: f.kind, name: f.name, cat: f.cat, by, at: new Date().toISOString()};
+  if (f.brand) meta.brand = f.brand; if (f.notes) meta.notes = f.notes;
+  try {
+    if (f.kind === "link") { meta.url = f.url; btn.textContent = "Saving…"; }
+    else {
+      const tok = await getToken(); if (!tok) throw new Error("notoken");
+      btn.textContent = "Encrypting…"; st.textContent = "Encrypting on this phone…";
+      const iv = rnd(12), ct = new Uint8Array(await crypto.subtle.encrypt({name: "AES-GCM", iv}, await teamKey(["encrypt"]), await f.file.arrayBuffer()));
+      const all = new Uint8Array(12 + ct.length); all.set(iv, 0); all.set(ct, 12);
+      btn.textContent = "Uploading…"; st.textContent = "Uploading " + fmtSize(f.file.size) + ". Keep this screen open.";
+      const path = "files/" + id + ".bin";
+      const res = await ghPath(tok, "PUT", path, {message: "Upload file: " + f.name, content: bytesToB64(all), branch: "main"});
+      Object.assign(meta, {path, sha: res && res.content && res.content.sha, size: f.file.size, mime: f.file.type || "", orig: f.file.name});
+    }
+    const d = await publish(x => { (x.files = x.files || []).push(meta); }, (f.kind === "link" ? "Add link: " : "Add file: ") + f.name);
+    fileForm = null; showApp(d); show("files"); toast(f.kind === "link" ? "Link saved." : "Uploaded.");
+  } catch (e) {
+    toast(e.message === "notoken" ? "Uploads need team updates turned on." : e.message === "auth" ? "GitHub didn't accept the upload. Tell an admin." : "Upload failed. Check your connection and try again.");
+    btn.disabled = false; btn.textContent = f.kind === "link" ? "Save link" : "Upload"; st.textContent = "";
   }
 }, true);
 $("main").addEventListener("submit", async ev => {
