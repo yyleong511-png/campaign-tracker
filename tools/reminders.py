@@ -8,6 +8,7 @@ Reminders go 7, 3 and 1 day(s) before:
   - tasks: their deadline (or end date for start -> end tasks), to the assignees; Done tasks skipped
   - shoots: the shoot date, to the team crew
   - brands: the next follow-up date, to whoever follows up; Confirmed / Declined skipped
+  - meetings: the meeting date and time, to the team members attending
 Anything with no one (or no emails) goes to the admins.
 """
 import base64, datetime as dt, json, os, sys
@@ -52,12 +53,13 @@ def main():
         when = fmt_day(due) + ", " + fmt_time(hm)
         first = {"Task": f"Reminder: \"{title}\" is due {LEADS[lead]}.",
                  "Shoot": f"Reminder: the shoot \"{title}\" is {LEADS[lead]}.",
-                 "Follow-up": f"Reminder: follow up with {title} {LEADS[lead]}."}[kind]
+                 "Follow-up": f"Reminder: follow up with {title} {LEADS[lead]}.",
+                 "Meeting": f"Reminder: the meeting \"{title}\" is {LEADS[lead]}."}[kind]
         lines = [first, "",
                  ("Due: " if kind == "Task" else "When: ") + when]
         lines += [x for x in details if x]
         lines += ["", "Campaign Tracker: " + SITE, "", "This is an automatic reminder from the Campaign Tracker."]
-        label = {"Task": f"{title} due", "Shoot": f"Shoot: {title}", "Follow-up": f"Follow up with {title}"}[kind]
+        label = {"Task": f"{title} due", "Shoot": f"Shoot: {title}", "Follow-up": f"Follow up with {title}", "Meeting": f"Meeting: {title}"}[kind]
         out.append({"to": to, "subject": f"Reminder: {label} {LEADS[lead]} ({fmt_day(due)[5:]})", "body": "\n".join(lines)})
 
     for t in d.get("tasks", []):
@@ -86,6 +88,16 @@ def main():
             "Location: " + s["location"] if s.get("location") else "",
             "Crew: " + ", ".join(names + ([s["crew"]] if s.get("crew") else [])) if (names or s.get("crew")) else "",
             "\n" + s["notes"] if s.get("notes") else ""])
+
+    for m in d.get("meetings", []):
+        if not m.get("date"):
+            continue
+        names = m.get("people") or []
+        add("Meeting", m.get("title", "Meeting"), m["date"], m.get("time") or "09:00", names, [
+            "Until: " + fmt_time(m["endTime"]) if m.get("endTime") else "",
+            "Location: " + m["location"] if m.get("location") else "",
+            "Attending: " + ", ".join(names + ([m["others"]] if m.get("others") else [])) if (names or m.get("others")) else "",
+            "\n" + m["notes"] if m.get("notes") else ""])
 
     for b in d.get("outreach", []):
         if not b.get("next") or (b.get("status") or "") in ("Confirmed", "Declined"):

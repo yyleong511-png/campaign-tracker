@@ -448,15 +448,38 @@ function tasksHtml(d) {
   return `<h2>Tasks &amp; Assignments</h2>
     ${admin ? `<button class="wide primary" data-task="new" style="margin-top:0">+ Add task</button>` : ""}` +
     (tasks.length ? tasks.map((t, i) => {
-      const cal = admin ? calUrl(t, d) : "";
-      return `<div class="card"><div class="head"><div class="ttl">${esc(t.task)}</div>${pill(t.status)}</div>
-      ${meta([["Assigned", assignees(t).join(", ")], ["When", whenText(t)]])}${note(t.notes)}
+      const done = /done/i.test(t.status || ""), cal = admin && !done ? calUrl(t, d) : "";
+      return `<div class="card"${done ? ' style="opacity:.75"' : ""}><div class="head"><div class="ttl">${esc(t.task)}</div>${pill(t.status)}</div>
+      ${meta([["Assigned", assignees(t).join(", ")], ["When", done ? "" : whenText(t)]])}${note(t.notes)}
       ${(admin || mine(t)) && canWrite(d) ? `<div class="seg" role="group" aria-label="Status">${TASK_STATUS.map(x => `<button data-tstatus="${i}" data-v="${x}" aria-pressed="${(t.status || "Not started") === x}">${x}</button>`).join("")}</div>` : ""}
       ${admin ? `<div style="display:flex;gap:8px;margin-top:12px">
         <button class="wide" data-task="${i}" style="margin:0;flex:1">Edit</button>
         ${inviteBtn(cal)}
       </div>` : ""}</div>`;
-    }).join("") : empty("No tasks yet."));
+    }).join("") : empty("No tasks yet.")) + meetingsHtml(d);
+}
+function meetingUrl(m, d) {
+  if (!m.date || !m.time) return "";
+  const [h, mi] = m.time.split(":").map(Number);
+  const end = m.endTime && m.endTime > m.time ? stamp(m.date, m.endTime) : stamp(m.date, m.time, Math.min(60, 24 * 60 - (h * 60 + mi)));
+  const ppl = m.people || [];
+  return calLink({text: m.title, dates: stamp(m.date, m.time) + "/" + end, location: m.location, emails: emailsOf(ppl, d),
+    details: [m.notes, ppl.length ? "Attending: " + ppl.join(", ") : "", m.others ? "Also: " + m.others : "", SITE_LINE()].filter(Boolean).join("\n\n")});
+}
+function meetingsHtml(d) {
+  const admin = isAdmin(), list = (d.meetings || []).map((m, i) => [m, i]);
+  const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  const up = list.filter(([m]) => (m.date || "") >= today).sort((a, b) => (a[0].date + a[0].time).localeCompare(b[0].date + b[0].time));
+  const past = list.filter(([m]) => (m.date || "") < today).sort((a, b) => (b[0].date + b[0].time).localeCompare(a[0].date + a[0].time));
+  const card = ([m, i], isPast) => `<div class="card"${isPast ? ' style="opacity:.7"' : ""}>
+    <div class="kicker">${esc(fmtDate(m.date))}${m.time ? " · " + esc(fmtTime(m.time)) + (m.endTime ? " – " + esc(fmtTime(m.endTime)) : "") : ""}${isPast ? " · " + T("Past") : ""}</div>
+    <div class="ttl">${esc(m.title)}</div>
+    ${meta([["Location", m.location], ["Attending", [...(m.people || []), m.others].filter(Boolean).join(", ")]])}${note(m.notes)}
+    ${admin ? `<div class="mini" style="margin-top:12px"><button data-rec="${i}" data-col="meetings">Edit</button>${isPast ? "" : inviteBtn(meetingUrl(m, d))}</div>` : ""}</div>`;
+  return `<h2>Meetings</h2>
+    ${admin ? `<button class="wide primary" data-rec="new" data-col="meetings" style="margin-top:0">+ Add meeting</button>` : ""}
+    ${up.length ? up.map(x => card(x, false)).join("") : empty("No meetings coming up.")}
+    ${past.length ? `<h2 style="font-size:15px">${T("Past meetings")}</h2>` + past.map(x => card(x, true)).join("") : ""}`;
 }
 function taskEditorHtml(d) {
   const t = taskEdit.t, team = (d.team || []).filter(m => m.name), mode = t._mode;
@@ -506,6 +529,8 @@ function myTasksHtml(d) {
     items.push({key: t.end || t.deadline || "9999", kind: "Task", title: t.task, when: whenText(t), right: pill(t.status), tab: "tasks"}); });
   (d.shoots || []).forEach(x => { if ((x.people || []).includes(me.name) && (x.date || "") >= today)
     items.push({key: x.date, kind: "Shoot", title: x.project, when: fmtDate(x.date) + (x.time ? ", " + fmtTime(x.time) : "") + (x.location ? " · " + x.location : ""), tab: "shoots"}); });
+  (d.meetings || []).forEach(m => { if ((m.people || []).includes(me.name) && (m.date || "") >= today)
+    items.push({key: m.date + (m.time || ""), kind: "Meeting", title: m.title, when: fmtDate(m.date) + (m.time ? ", " + fmtTime(m.time) : "") + (m.location ? " · " + m.location : ""), tab: "tasks"}); });
   (d.outreach || []).forEach(b => { if ((b.followBy || []).includes(me.name) && b.next && b.next >= today && !/confirmed|declined/i.test(b.status || ""))
     items.push({key: b.next, kind: "Follow up", title: b.brand, when: fmtDate(b.next) + ", " + fmtTime(b.nextTime || DEF_DUE), tab: "brands"}); });
   if (!items.length) return "";
@@ -558,6 +583,9 @@ const REC = {
     ["location", "Location", "text"], ["people", "Crew from the team", "people"], ["crew", "Other crew (not on the team)", "text"], ["notes", "Notes", "area"]]},
   budget: {title: "item", tab: "budget", label: "Entry", fields: [
     ["item", "Item", "text", 1], ["type", "Type", ["Expense", "Income"]], ["amount", "Amount (RM)", "number", 1], ["date", "Date", "date"], ["by", "Handled by", "text"], ["notes", "Notes", "area"]]},
+  meetings: {title: "title", tab: "tasks", label: "Meeting", fields: [
+    ["title", "Meeting", "text", 1], ["date", "Date", "date", 1], ["time", "Start time", "time", 1], ["endTime", "End time (no time: 1 hour)", "time"],
+    ["location", "Location", "text"], ["people", "Who's attending from the team", "people"], ["others", "Others attending (not on the team)", "text"], ["notes", "Notes", "area"]]},
   log: {title: "date", tab: "log", label: "Log entry", fields: [
     ["date", "Date", "date", 1], ["progress", "Progress", "area", 1], ["followup", "To follow up", "area"]]}
 };
@@ -815,7 +843,7 @@ function render(d) {
       ${offer.workflowNote ? `<div class="mute small" style="margin-top:8px">${esc(offer.workflowNote)}</div>` : ""}</div>` : ""}`}
     ${log.length ? `<h2>Latest update</h2>${logCard(log[log.length - 1])}` : ""}`;
 
-  s.tasks = tasksHtml(d);
+  s.tasks = (recEdit && recEdit.col === "meetings") ? recEditorHtml() : tasksHtml(d);
 
   const adm = isAdmin();
   const addBtn = col => adm ? `<button class="wide primary" data-rec="new" data-col="${col}" style="margin-top:0">+ Add</button>` : "";
@@ -1420,7 +1448,7 @@ $("main").addEventListener("submit", async ev => {
   ev.preventDefault(); ev.stopImmediatePropagation();
   const {col, i, before} = recEdit, c = REC[col], r = readRecForm();
   for (const [k, lab, type, req] of c.fields) if (req && (r[k] === undefined || r[k] === "")) { toast(lab + " is needed."); return; }
-  if (col === "shoots" && r.endTime && r.endTime <= (r.time || "09:00")) { toast("End time is before the start time."); return; }
+  if ((col === "shoots" || col === "meetings") && r.endTime && r.endTime <= (r.time || "09:00")) { toast("End time is before the start time."); return; }
   const btn = ev.target.querySelector("button[type=submit]"); btn.disabled = true; btn.textContent = "Saving…";
   try {
     const d = await publish(x => {

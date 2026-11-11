@@ -34,7 +34,12 @@ window.__ZH = {
   "Ideal for:": "适合：",
   "Item {n}": "项目 {n}", "Step {n}": "步骤 {n}", "Remove item {n}": "删除项目 {n}",
   "Files over {max} go here. Paste the link of a shared Drive folder so everyone uploads to the same place.": "超过 {max} 的文件放这里。贴上共用 Drive 文件夹的链接，大家就会上传到同一个地方。",
-  "Present file": "全屏展示文件", "e.g. 20 photos": "例如：20 张照片",
+  "Present file": "全屏展示文件",
+  "Meetings": "会议", "Meeting": "会议", "+ Add meeting": "+ 新增会议", "New meeting": "新会议", "Edit meeting": "编辑会议",
+  "Start time": "开始时间", "End time (no time: 1 hour)": "结束时间（没填就是 1 小时）",
+  "Who's attending from the team": "团队里谁参加", "Others attending (not on the team)": "其他参加的人（不在团队里）",
+  "Attending": "参加", "No meetings coming up.": "近期没有会议。", "Past meetings": "过去的会议", "Past": "已结束",
+  "Meeting is needed.": "请填会议名称。", "Start time is needed.": "请填开始时间。", "e.g. 20 photos": "例如：20 张照片",
 
   // navigation + page titles
   "Home": "主页", "Tasks": "任务", "Brands": "品牌", "Shoots": "拍摄", "Budget": "预算", "Files": "文件", "Log": "记录",
