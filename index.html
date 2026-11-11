@@ -182,6 +182,30 @@ nav{padding-left:calc(16px + env(safe-area-inset-left));padding-right:calc(16px 
   header.top .logo{width:42px;height:42px;font-size:16px;border-radius:13px}
   header.top .logo:after{left:13px;right:13px;bottom:7px;height:3px}
 }
+.calhead{display:flex;align-items:center;gap:8px;margin:20px 4px 10px}
+.calhead h2{margin:0;flex:1;font-size:19px}
+.calhead button{min-width:40px;min-height:40px;padding:0 10px;background:var(--panel)}
+.calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;background:var(--panel);border-radius:20px;padding:10px}
+.calgrid .dow{font-size:11px;font-weight:700;color:var(--mute);text-align:center;padding:2px 0 6px}
+.calgrid button{min-height:46px;padding:4px 0 6px;border-radius:12px;background:none;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:14px;font-weight:600}
+.calgrid button.out{color:#B4B7C5}
+.calgrid button.today{box-shadow:0 0 0 2px var(--accent) inset}
+.calgrid button[aria-pressed="true"]{background:var(--accent);color:#fff}
+.dots{display:flex;gap:3px;height:6px}
+.dots i{width:6px;height:6px;border-radius:50%;display:block}
+.legend{display:flex;flex-wrap:wrap;gap:6px 12px;margin:8px 4px 0;font-size:11px;color:var(--mute)}
+.legend span{display:flex;align-items:center;gap:5px}
+.legend i{width:8px;height:8px;border-radius:50%;display:block}
+.ev{display:flex;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
+.ev:first-child{border-top:0;padding-top:2px}
+.ev .mini > *{white-space:nowrap;font-size:12px !important;padding:8px 6px !important;line-height:20px !important;min-height:38px}
+.ev .tm{flex:none;width:52px;font-size:13px;font-weight:700;color:var(--tintink);padding-top:2px}
+.ev .bar{flex:none;width:4px;border-radius:2px}
+.kpill{font-size:11px;font-weight:700;border-radius:999px;padding:2px 8px;color:#fff;margin-right:6px;vertical-align:1px}
+.memo{display:flex;gap:12px;padding:12px 0;border-top:1px solid var(--line);align-items:flex-start}
+.memo:first-child{border-top:0;padding-top:2px}
+.memo input[type=checkbox]{width:24px;height:24px;margin:2px 0 0;accent-color:var(--accent);flex:none}
+.memo.done .u{text-decoration:line-through;color:var(--mute)}
 .langbtn{width:44px;height:44px;padding:0;border-radius:50%;font-size:13px;font-weight:700;color:var(--tintink);background:var(--panel);flex:none}
 #langlock{position:fixed;top:calc(12px + env(safe-area-inset-top));right:calc(12px + env(safe-area-inset-right));z-index:6;box-shadow:0 2px 10px rgba(23,26,43,.1)}
 html[lang="zh-Hans"] body{font-family:var(--font),"PingFang SC","Hiragino Sans GB","Noto Sans CJK SC","Microsoft YaHei",sans-serif}
@@ -277,7 +301,8 @@ html[lang="zh-Hans"] body{font-family:var(--font),"PingFang SC","Hiragino Sans G
 <script>
 "use strict";
 const KEY_STORE = "ct.key.v1";
-const TABS = [["overview","Home"],["tasks","Tasks"],["brands","Brands"],["shoots","Shoots"],["budget","Budget"],["files","Files"],["log","Log"]];
+const TABS = [["overview","Home"],["schedule","Schedule"],["tasks","Tasks"],["brands","Brands"],["shoots","Shoots"],["budget","Budget"],["files","Files"]];
+const HIDDEN = ["log", "profile", "admin"]; // pages reached from buttons, not the bottom bar
 const $ = id => document.getElementById(id);
 const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
@@ -425,7 +450,7 @@ function followUrl(b, d) {
   return calLink({text: "Follow up: " + b.brand, dates: dueBlock(b.next, b.nextTime || DEF_DUE), emails: emailsOf(ppl, d),
     details: [b.contact ? "Contact: " + b.contact : "", b.status ? "Status: " + b.status : "", b.notes, SITE_LINE()].filter(Boolean).join("\n\n")});
 }
-const inviteBtn = url => url ? `<a class="wide primary" href="${esc(url)}" target="_blank" rel="noopener" style="margin:0;flex:1.4;text-align:center;text-decoration:none;border-radius:14px;font-weight:600;display:block;padding:9px 8px;font-size:13px;min-height:40px;line-height:22px">Send calendar invite</a>` : "";
+const inviteBtn = (url, label) => url ? `<a class="wide primary" href="${esc(url)}" target="_blank" rel="noopener" style="margin:0;flex:1.4;text-align:center;text-decoration:none;border-radius:14px;font-weight:600;display:block;padding:9px 8px;font-size:13px;min-height:40px;line-height:22px">${T(label || "Send calendar invite")}</a>` : "";
 function calUrl(t, d) {
   const names = assignees(t);
   const emails = (d.team || []).filter(m => names.includes(m.name) && m.email).map(m => m.email);
@@ -529,6 +554,8 @@ function myTasksHtml(d) {
     items.push({key: t.end || t.deadline || "9999", kind: "Task", title: t.task, when: whenText(t), right: pill(t.status), tab: "tasks"}); });
   (d.shoots || []).forEach(x => { if ((x.people || []).includes(me.name) && (x.date || "") >= today)
     items.push({key: x.date, kind: "Shoot", title: x.project, when: fmtDate(x.date) + (x.time ? ", " + fmtTime(x.time) : "") + (x.location ? " · " + x.location : ""), tab: "shoots"}); });
+  (d.memos || []).forEach(m => { if (!m.done && m.date && (m.people || []).includes(me.name) && m.date >= today)
+    items.push({key: m.date + (m.time || ""), kind: "Memo", title: m.text, when: fmtDate(m.date) + (m.time ? ", " + fmtTime(m.time) : ""), tab: "schedule"}); });
   (d.meetings || []).forEach(m => { if ((m.people || []).includes(me.name) && (m.date || "") >= today)
     items.push({key: m.date + (m.time || ""), kind: "Meeting", title: m.title, when: fmtDate(m.date) + (m.time ? ", " + fmtTime(m.time) : "") + (m.location ? " · " + m.location : ""), tab: "tasks"}); });
   (d.outreach || []).forEach(b => { if ((b.followBy || []).includes(me.name) && b.next && b.next >= today && !/confirmed|declined/i.test(b.status || ""))
@@ -779,6 +806,129 @@ async function downloadFile(f) {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
+// ---- Schedule: month calendar + day agenda + memos ----
+const KIND_COLOR = {Meeting: "#4338CA", Task: "#C2410C", Shoot: "#15803D", "Follow up": "#BE185D", Memo: "#475569"};
+const todayKL = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+let cal = null; // {y, m, sel}
+let calFilter = "All";
+const CAL_FILTERS = [["All", "All"], ["Meeting", "Meetings"], ["Shoot", "Shoots"], ["Task", "Tasks"], ["Follow up", "Follow-ups"], ["Memo", "Memos"]];
+let memoEdit = null; // {i, r, before}
+function addMin(date, hm, min) { const [y, mo, d] = date.split("-").map(Number), [h, mi] = hm.split(":").map(Number); const x = new Date(Date.UTC(y, mo - 1, d, h, mi + min)); return [x.toISOString().slice(0, 10), x.toISOString().slice(11, 16)]; }
+function allEvents(d) {
+  const ev = [];
+  (d.meetings || []).forEach((m, i) => m.date && ev.push({col: "meetings", idx: i, date: m.date, time: m.time || "", end: m.endTime || addMin(m.date, m.time || "09:00", 60)[1], kind: "Meeting", title: m.title, loc: m.location,
+    who: [...(m.people || []), m.others].filter(Boolean).join(", "), notes: m.notes, tab: "tasks", people: m.people || [], invite: meetingUrl(m, d)}));
+  (d.tasks || []).forEach(t => { if (/done/i.test(t.status || "")) return;
+    const date = t.end || t.deadline, hm = (t.end ? t.endTime : t.time) || DEF_DUE; if (!date) return;
+    ev.push({date, time: hm, due: true, kind: "Task", title: t.task, who: assignees(t).join(", "), notes: t.notes, tab: "tasks", people: assignees(t), invite: calUrl(t, d)}); });
+  (d.shoots || []).forEach((x, i) => x.date && ev.push({col: "shoots", idx: i, date: x.date, time: x.time || "", end: x.endTime || addMin(x.date, x.time || "09:00", 120)[1], kind: "Shoot", title: x.project, loc: x.location,
+    who: [...(x.people || []), x.crew].filter(Boolean).join(", "), notes: x.notes, tab: "shoots", people: x.people || [], invite: shootUrl(x, d)}));
+  (d.outreach || []).forEach(b => { if (!b.next || /confirmed|declined/i.test(b.status || "")) return;
+    ev.push({date: b.next, time: b.nextTime || DEF_DUE, due: true, kind: "Follow up", title: b.brand, who: (b.followBy || []).join(", "), notes: b.notes, tab: "brands", people: b.followBy || [], invite: followUrl(b, d)}); });
+  (d.memos || []).forEach(m => { if (m.done || !m.date) return;
+    ev.push({date: m.date, time: m.time || "", end: m.time ? addMin(m.date, m.time, 30)[1] : "", kind: "Memo", title: m.text, who: (m.people || []).join(", "), notes: m.notes, tab: "schedule", people: m.people || [], invite: memoUrl(m, d)}); });
+  return ev;
+}
+function memoUrl(m, d) {
+  if (!m.date) return "";
+  const hm = m.time || "09:00";
+  return calLink({text: m.text, dates: stamp(m.date, hm) + "/" + stamp(m.date, hm, 30), emails: emailsOf(m.people || [], d),
+    details: [m.notes, (m.people || []).length ? "For: " + m.people.join(", ") : "", SITE_LINE()].filter(Boolean).join("\n\n")});
+}
+function icsHref(e) {
+  const pad = n => String(n).padStart(2, "0");
+  const utc = (date, hm) => { const [y, mo, d] = date.split("-").map(Number), [h, mi] = hm.split(":").map(Number); const x = new Date(Date.UTC(y, mo - 1, d, h - 8, mi));
+    return x.getUTCFullYear() + pad(x.getUTCMonth() + 1) + pad(x.getUTCDate()) + "T" + pad(x.getUTCHours()) + pad(x.getUTCMinutes()) + "00Z"; };
+  const tx = s => String(s || "").replace(/\\/g, "\\\\").replace(/;/g, "\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
+  let st, en;
+  if (e.due) { const s0 = addMin(e.date, e.time, -30); st = utc(s0[0], s0[1]); en = utc(e.date, e.time); }
+  else { const t0 = e.time || "09:00"; st = utc(e.date, t0); const e1 = e.end && e.end > t0 ? [e.date, e.end] : addMin(e.date, t0, 60); en = utc(e1[0], e1[1]); }
+  const title = (e.kind === "Task" ? "Due: " : e.kind === "Follow up" ? "Follow up: " : "") + e.title;
+  const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Campaign Tracker//EN", "CALSCALE:GREGORIAN", "METHOD:PUBLISH", "BEGIN:VEVENT",
+    "UID:" + st + "-" + Math.random().toString(36).slice(2) + "@campaign-tracker", "DTSTAMP:" + new Date().toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z",
+    "DTSTART:" + st, "DTEND:" + en, "SUMMARY:" + tx(title), e.loc ? "LOCATION:" + tx(e.loc) : "",
+    "DESCRIPTION:" + tx([e.notes, e.who ? "With: " + e.who : "", SITE_LINE()].filter(Boolean).join("\n\n")),
+    "BEGIN:VALARM", "TRIGGER:-PT30M", "ACTION:DISPLAY", "DESCRIPTION:" + tx(title), "END:VALARM", "END:VEVENT", "END:VCALENDAR"].filter(Boolean).join("\r\n");
+  return "data:text/calendar;charset=utf-8," + encodeURIComponent(ics);
+}
+function scheduleHtml(d) {
+  if (memoEdit) return memoEditorHtml(d);
+  const today = todayKL();
+  if (!cal) cal = {y: +today.slice(0, 4), m: +today.slice(5, 7) - 1, sel: today};
+  const ev = allEvents(d).filter(e => calFilter === "All" || e.kind === calFilter), byDay = {};
+  ev.forEach(e => (byDay[e.date] = byDay[e.date] || []).push(e));
+  const first = new Date(Date.UTC(cal.y, cal.m, 1)), startDow = (first.getUTCDay() + 6) % 7; // Monday first
+  const cells = [];
+  for (let k = 0; k < 42; k++) {
+    const x = new Date(Date.UTC(cal.y, cal.m, 1 - startDow + k)), iso = x.toISOString().slice(0, 10);
+    if (k >= 35 && x.getUTCMonth() !== cal.m) break;
+    const kinds = [...new Set((byDay[iso] || []).map(e => e.kind))].slice(0, 4);
+    cells.push(`<button data-day="${iso}" aria-pressed="${iso === cal.sel}" class="${x.getUTCMonth() !== cal.m ? "out" : ""} ${iso === today ? "today" : ""}" aria-label="${esc(fmtDate(iso))}${kinds.length ? ", " + kinds.map(k => T(k)).join(", ") : ""}">
+      <span>${x.getUTCDate()}</span><span class="dots">${kinds.map(k => `<i style="background:${iso === cal.sel ? "#fff" : KIND_COLOR[k]}"></i>`).join("")}</span></button>`);
+  }
+  const monthName = new Date(Date.UTC(cal.y, cal.m, 1)).toLocaleDateString(LANG === "zh" ? "zh-CN" : "en-GB", {month: "long", year: "numeric", timeZone: "UTC"});
+  const dows = LANG === "zh" ? ["一", "二", "三", "四", "五", "六", "日"] : ["M", "T", "W", "T", "F", "S", "S"];
+  const dayEv = (byDay[cal.sel] || []).sort((a, b) => (a.time || "00:00").localeCompare(b.time || "00:00"));
+  const admin = isAdmin(), can = canWrite(d);
+  return `<div class="calhead"><h2>${esc(monthName)}</h2>
+      <button data-cal="prev" aria-label="${T("Previous month")}">‹</button><button data-cal="today">${T("Today")}</button><button data-cal="next" aria-label="${T("Next month")}">›</button></div>
+    <div class="fchips" role="group" aria-label="${T("Show")}" style="margin:0 0 8px">${CAL_FILTERS.map(([k, lab]) => `<button data-cfil="${k}" aria-pressed="${calFilter === k}">${k !== "All" ? `<i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${KIND_COLOR[k]};margin-right:6px;vertical-align:0"></i>` : ""}${T(lab)}</button>`).join("")}</div>
+    <div class="calgrid" role="grid">${dows.map(x => `<div class="dow">${x}</div>`).join("")}${cells.join("")}</div>
+    ${calFilter === "All" ? `<div class="legend">${Object.keys(KIND_COLOR).map(k => `<span><i style="background:${KIND_COLOR[k]}"></i>${T(k)}</span>`).join("")}</div>` : ""}
+    <h2>${esc(fmtDate(cal.sel))}</h2>
+    ${admin || can ? `<div class="mini" style="margin-top:0">${admin ? `<button data-rec="new" data-col="meetings" data-back="schedule" style="background:var(--accent);color:#fff">${T("+ Meeting")}</button><button data-rec="new" data-col="shoots" data-back="schedule" style="background:${KIND_COLOR.Shoot};color:#fff">${T("+ Shoot")}</button>` : ""}${can ? `<button data-memo="new" style="background:var(--panel)">${T("+ Memo")}</button>` : ""}</div>` : ""}
+    ${dayEv.length ? `<div class="card">${dayEv.map(e => evRow(e, false, admin)).join("")}</div>` : empty("Nothing on this day.")}
+    <h2>${T("Upcoming")}</h2>
+    ${(() => { const up = ev.filter(e => e.date >= today).sort((a, b) => (a.date + (a.time || "00:00")).localeCompare(b.date + (b.time || "00:00"))).slice(0, 15);
+      return up.length ? `<div class="card">${up.map(e => evRow(e, true, admin)).join("")}</div>` : empty("Nothing coming up."); })()}
+    ${calFilter === "All" || calFilter === "Memo" ? memosHtml(d) : ""}`;
+}
+function evRow(e, withDate, admin) {
+  return `<div class="ev"><div class="tm">${withDate ? `<div style="color:var(--ink)">${esc(fmtDayShort(e.date))}</div>` : ""}${e.time ? (e.due ? T("by") + " " : "") + esc(fmtTime(e.time)) : T("All day")}</div>
+        <div class="bar" style="background:${KIND_COLOR[e.kind]}"></div>
+        <div style="flex:1;min-width:0"><div><span class="kpill" style="background:${KIND_COLOR[e.kind]}">${T(e.kind)}</span><span class="u" style="font-weight:700">${esc(e.title)}</span></div>
+        ${e.loc ? `<div class="mute small" style="margin-top:3px">${T("Location")}${LANG === "zh" ? "：" : ": "}<span class="u">${esc(e.loc)}</span></div>` : ""}
+        ${e.who ? `<div class="mute small" style="margin-top:2px">${T("With")}${LANG === "zh" ? "：" : ": "}<span class="u">${esc(e.who)}</span></div>` : ""}
+        <div class="mini"><a href="${icsHref(e)}" aria-label="${T("Add to my calendar")}" download="${esc(e.title.replace(/[^\w\- ]+/g, "").trim() || "event")}.ics" style="flex:1;text-align:center;text-decoration:none;border-radius:14px;font-weight:600;padding:9px 8px;font-size:13px;background:var(--bg);color:var(--ink)">${T("My calendar")}</a>
+          ${admin && e.col ? `<button data-rec="${e.idx}" data-col="${e.col}" data-back="schedule">${T("Edit")}</button>` : ""}
+          ${admin && e.invite ? inviteBtn(e.invite, "Invite") : ""}</div></div></div>`;
+}
+function fmtDayShort(iso) {
+  const d = new Date(iso + "T00:00:00");
+  return LANG === "zh" ? d.toLocaleDateString("zh-CN", {month: "numeric", day: "numeric", weekday: "short"}) : d.toLocaleDateString("en-GB", {weekday: "short", day: "numeric", month: "short"});
+}
+function memosHtml(d) {
+  const memos = (d.memos || []).map((m, i) => [m, i]), me = ((profile() || {}).name || "").trim().toLowerCase(), admin = isAdmin(), can = canWrite(d);
+  const open = memos.filter(([m]) => !m.done).sort((a, b) => (a[0].date || "9999").localeCompare(b[0].date || "9999"));
+  const done = memos.filter(([m]) => m.done).slice(-10).reverse();
+  const row = ([m, i]) => { const mine = (m.by || "").trim().toLowerCase() === me, canEd = can && (admin || mine);
+    return `<div class="memo ${m.done ? "done" : ""}"><input type="checkbox" data-mdone="${i}" ${m.done ? "checked" : ""} ${can ? "" : "disabled"} aria-label="${T("Done")}">
+      <div style="flex:1;min-width:0"><div class="u" style="font-weight:600">${esc(m.text)}</div>
+      <div class="meta" style="margin-top:3px">${[m.date ? fmtDate(m.date) + (m.time ? ", " + fmtTime(m.time) : "") : "", (m.people || []).join(", "), m.by ? T("by {name}", {name: m.by}) : ""].filter(Boolean).map(x => `<span>${esc(x)}</span>`).join("")}</div>
+      ${note(m.notes)}
+      ${canEd && !m.done ? `<div class="mini"><button data-memo="${i}">${T("Edit")}</button>${m.date && (m.people || []).length ? inviteBtn(memoUrl(m, d)) : ""}</div>` : ""}</div></div>`; };
+  return `<h2>${T("Memos")}</h2>
+    ${can ? `<button class="wide primary" data-memo="new" style="margin-top:0">${T("+ Add memo")}</button>` : ""}
+    ${open.length ? `<div class="card">${open.map(row).join("")}</div>` : empty("No memos.")}
+    ${done.length ? `<h2 style="font-size:15px">${T("Done ({n})", {n: memos.filter(([m]) => m.done).length})}</h2><div class="card">${done.map(row).join("")}</div>` : ""}`;
+}
+function memoEditorHtml(d) {
+  const r = memoEdit.r, team = (d.team || []).filter(m => m.name);
+  return `<h2>${T(memoEdit.i < 0 ? "New memo" : "Edit memo")}</h2>
+    <form class="card ed" id="mm-form" autocomplete="off" style="border:0">
+      <label>${T("Memo")}<textarea id="mm-text" maxlength="300" required>${esc(r.text)}</textarea></label>
+      <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:8px">
+        <label>${T("Date")}<input id="mm-date" type="date" value="${esc(r.date)}"></label>
+        <label>${T("Time")}<input id="mm-time" type="time" value="${esc(r.time)}"></label></div>
+      <div style="font-size:12px;font-weight:600;color:var(--mute);margin-top:14px">${T("For")}</div>
+      ${team.map(m => `<label class="chk"><input type="checkbox" data-mp value="${esc(m.name)}" ${(r.people || []).includes(m.name) ? "checked" : ""}><span><span class="u">${esc(m.name)}</span> <span class="mute small">· ${esc(m.role)}</span></span></label>`).join("")}
+      <label>${T("Notes")}<input id="mm-notes" value="${esc(r.notes)}" maxlength="300"></label>
+      <button class="wide primary" type="submit">${T("Save")}</button>
+      <button class="wide" type="button" data-memo="cancel">${T("Cancel")}</button>
+      ${memoEdit.i >= 0 ? `<button class="rm" type="button" data-memo="delete">${T("Delete")}</button>` : ""}
+    </form>`;
+}
+function rerenderSchedule() { $("s-schedule").innerHTML = scheduleHtml(lastData); }
 function rerenderTasks() { $("s-tasks").innerHTML = tasksHtml(lastData); }
 const money = n => { const v = Number(n || 0), a = Math.abs(v), dec = Number.isInteger(a) ? 0 : 2;
   return (v < 0 ? "−" : "") + "RM " + a.toLocaleString("en-MY", {minimumFractionDigits: dec, maximumFractionDigits: dec}); };
@@ -869,11 +1019,12 @@ function render(d) {
     ${meta([["Date", fmtDate(x.date)], ["Handled by", x.by]])}${note(x.notes)}${editBtn("budget", i)}</div>`).join("") : empty("No income or expenses recorded yet."));
 
   s.files = filesHtml(d);
+  s.schedule = scheduleHtml(d);
   s.log = (recEdit && recEdit.col === "log") ? recEditorHtml() : `<h2>Daily Update Log</h2>${addBtn("log")}` + (log.length ? log.map((l, i) => [l, i]).reverse().map(([l, i]) => logCard(l, editBtn("log", i))).join("") : empty("No updates yet."));
 
   s.profile = profileHtml(d);
   s.admin = adminHtml(d);
-  $("main").innerHTML = [...TABS, ["profile"], ["admin"]].map(([id]) => `<section id="s-${id}" hidden>${s[id]}</section>`).join("");
+  $("main").innerHTML = [...TABS.map(t => t[0]), ...HIDDEN].map(id => `<section id="s-${id}" hidden>${s[id]}</section>`).join("");
   show(location.hash.slice(1));
 }
 function logCard(l, extra) {
@@ -882,8 +1033,8 @@ function logCard(l, extra) {
 }
 function show(id) {
   if (id === "admin" && !isAdmin()) id = "profile";
-  if (id !== "profile" && id !== "admin" && !TABS.some(t => t[0] === id)) id = "overview";
-  [...TABS, ["profile"], ["admin"]].forEach(([t]) => { const el = $("s-" + t); if (el) el.hidden = t !== id; });
+  if (!HIDDEN.includes(id) && !TABS.some(t => t[0] === id)) id = "overview";
+  [...TABS.map(t => t[0]), ...HIDDEN].forEach(t => { const el = $("s-" + t); if (el) el.hidden = t !== id; });
   document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-current", b.dataset.tab === id ? "true" : "false"));
   window.scrollTo(0, 0);
 }
@@ -1193,6 +1344,28 @@ $("main").addEventListener("click", async ev => {
     else { readOffer(); if (v === "add") offerEdit.deliverables.push({item: "", spec: ""}); if (v === "rm") offerEdit.deliverables.splice(+b.dataset.i, 1); }
     render(lastData); show("overview"); return;
   }
+  if (b.dataset.cfil) { calFilter = b.dataset.cfil; rerenderSchedule(); return; }
+  if (b.dataset.day) { cal.sel = b.dataset.day; const [y, m] = cal.sel.split("-").map(Number); cal.y = y; cal.m = m - 1; rerenderSchedule(); return; }
+  if (b.dataset.cal) {
+    if (b.dataset.cal === "today") { const t = todayKL(); cal = {y: +t.slice(0, 4), m: +t.slice(5, 7) - 1, sel: t}; }
+    else { cal.m += b.dataset.cal === "next" ? 1 : -1; if (cal.m > 11) { cal.m = 0; cal.y++; } if (cal.m < 0) { cal.m = 11; cal.y--; }
+      cal.sel = `${cal.y}-${String(cal.m + 1).padStart(2, "0")}-01`; }
+    rerenderSchedule(); return;
+  }
+  if (b.dataset.memo !== undefined) {
+    const v = b.dataset.memo;
+    if (v === "new") { memoEdit = {i: -1, r: {date: cal ? cal.sel : todayKL(), people: []}}; rerenderSchedule(); show("schedule"); window.scrollTo(0, 0); return; }
+    if (v === "cancel") { memoEdit = null; rerenderSchedule(); return; }
+    if (v === "delete") {
+      if (!b.dataset.sure) { b.dataset.sure = "1"; b.textContent = T("Tap again to delete"); return; }
+      const id = memoEdit.r.id; b.disabled = true;
+      try { const d = await publish(x => { x.memos = (x.memos || []).filter(m => m.id !== id); }, "Delete memo"); memoEdit = null; showApp(d); show("schedule"); toast("Deleted."); }
+      catch (e) { toast("Could not save. Try again."); b.disabled = false; }
+      return;
+    }
+    const m = (lastData.memos || [])[+v]; if (!m) return;
+    memoEdit = {i: +v, r: JSON.parse(JSON.stringify(m))}; rerenderSchedule(); window.scrollTo(0, 0); return;
+  }
   if (b.dataset.fcat) { fileFilter.cat = b.dataset.fcat; rerenderFiles(); return; }
   if (b.dataset.file) {
     const v = b.dataset.file;
@@ -1249,11 +1422,11 @@ $("main").addEventListener("click", async ev => {
   }
   if (b.dataset.rec !== undefined) {
     const v = b.dataset.rec;
-    if (v === "new") { const col = b.dataset.col; recEdit = {col, i: -1, r: col === "budget" ? {type: "Expense"} : col === "log" ? {date: new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10)} : {}}; render(lastData); show(REC[col].tab); window.scrollTo(0, 0); return; }
-    if (v === "cancel") { const tab = REC[recEdit.col].tab; recEdit = null; render(lastData); show(tab); return; }
+    if (v === "new") { const col = b.dataset.col; recEdit = {col, i: -1, back: b.dataset.back, r: col === "budget" ? {type: "Expense"} : col === "log" ? {date: todayKL()} : ((col === "meetings" || col === "shoots") && b.dataset.back === "schedule" && cal) ? {date: cal.sel} : {}}; render(lastData); show(REC[col].tab); window.scrollTo(0, 0); return; }
+    if (v === "cancel") { const tab = recEdit.back || REC[recEdit.col].tab; recEdit = null; render(lastData); show(tab); return; }
     if (v === "delete") {
       if (!b.dataset.sure) { b.dataset.sure = "1"; b.textContent = "Tap again to delete"; return; }
-      const {col, i, before} = recEdit, tab = REC[col].tab; b.disabled = true;
+      const {col, i, before} = recEdit, tab = recEdit.back || REC[col].tab; b.disabled = true;
       try {
         const d = await publish(x => { const a = x[col] || []; if (JSON.stringify(a[i]) !== before) throw new Error("moved"); a.splice(i, 1); }, "Delete from " + col);
         recEdit = null; showApp(d); show(tab); toast("Deleted.");
@@ -1261,7 +1434,7 @@ $("main").addEventListener("click", async ev => {
       return;
     }
     const col = b.dataset.col, i = +v, r = (lastData[col] || [])[i]; if (!r) return;
-    recEdit = {col, i, r: JSON.parse(JSON.stringify(r)), before: JSON.stringify(r)}; render(lastData); show(REC[col].tab); window.scrollTo(0, 0); return;
+    recEdit = {col, i, back: b.dataset.back, r: JSON.parse(JSON.stringify(r)), before: JSON.stringify(r)}; render(lastData); show(REC[col].tab); window.scrollTo(0, 0); return;
   }
   if (b.dataset.task !== undefined && b.closest("#s-tasks")) {
     const v = b.dataset.task;
@@ -1392,6 +1565,29 @@ $("main").addEventListener("submit", async ev => {
   try { const d = await publish(x => { if (v) x.driveFolder = v; else delete x.driveFolder; }, "Set team Drive folder"); showApp(d); history.replaceState(null, "", "#admin"); show("admin"); toast("Saved."); }
   catch (e) { toast("Could not save. Try again."); btn.disabled = false; }
 }, true);
+$("main").addEventListener("change", async ev => {
+  if (ev.target.dataset.mdone === undefined) return;
+  const cb = ev.target, m = (lastData.memos || [])[+cb.dataset.mdone]; if (!m) return;
+  const want = cb.checked; cb.disabled = true;
+  try { const d = await publish(x => { const y = (x.memos || []).find(z => z.id === m.id); if (y) y.done = want; }, (want ? "Memo done: " : "Memo reopened: ") + m.text.slice(0, 40)); showApp(d); show("schedule"); }
+  catch (e) { toast("Could not save. Try again."); cb.checked = !want; cb.disabled = false; }
+});
+$("main").addEventListener("submit", async ev => {
+  if (ev.target.id !== "mm-form") return;
+  ev.preventDefault(); ev.stopImmediatePropagation();
+  const r = Object.assign({}, memoEdit.r, {text: $("mm-text").value.trim(), date: $("mm-date").value, time: $("mm-time").value, notes: $("mm-notes").value.trim(),
+    people: [...document.querySelectorAll("#mm-form [data-mp]")].filter(x => x.checked).map(x => x.value)});
+  if (!r.text) { toast("Write the memo first."); return; }
+  if (!r.date) delete r.date; if (!r.time) delete r.time; if (!r.notes) delete r.notes;
+  const isNew = memoEdit.i < 0;
+  if (isNew) { r.id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6); r.by = (profile() || {}).name || ""; r.at = new Date().toISOString(); }
+  const btn = ev.target.querySelector("button[type=submit]"); btn.disabled = true;
+  try {
+    const d = await publish(x => { x.memos = x.memos || []; if (isNew) x.memos.push(r); else { const k = x.memos.findIndex(z => z.id === r.id); if (k < 0) throw new Error("moved"); x.memos[k] = r; } }, (isNew ? "Add memo: " : "Edit memo: ") + r.text.slice(0, 40));
+    memoEdit = null; if (r.date && cal) { cal.sel = r.date; cal.y = +r.date.slice(0, 4); cal.m = +r.date.slice(5, 7) - 1; }
+    showApp(d); show("schedule"); toast("Saved.");
+  } catch (e) { toast(e.message === "moved" ? "This changed meanwhile. Tap Refresh and try again." : e.message === "notoken" ? "Uploads need team updates turned on." : "Could not save. Try again."); btn.disabled = false; }
+}, true);
 $("main").addEventListener("change", ev => {
   if (ev.target.id !== "fl-input") return;
   const file = ev.target.files && ev.target.files[0]; if (!file) return;
@@ -1455,7 +1651,7 @@ $("main").addEventListener("submit", async ev => {
       const a = (x[col] = x[col] || []);
       if (i < 0) a.push(r); else { if (JSON.stringify(a[i]) !== before) throw new Error("moved"); a[i] = r; }
     }, (i < 0 ? "Add to " : "Edit ") + col + ": " + (r[c.title] || ""));
-    recEdit = null; showApp(d); show(c.tab); toast("Saved.");
+    const back = recEdit.back; recEdit = null; showApp(d); show(back || c.tab); toast("Saved.");
   } catch (e) {
     toast(e.message === "moved" ? "This changed meanwhile. Tap Refresh and try again." : e.message === "notoken" ? "Connect GitHub in Admin first." : "Could not save. Try again.");
     btn.disabled = false; btn.textContent = "Save";

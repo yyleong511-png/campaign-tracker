@@ -4,11 +4,13 @@
   TRACKER_PW=... python3 tools/reminders.py data.enc.json [YYYY-MM-DD]
 
 Prints JSON: [{"to": [...], "subject": "...", "body": "..."}]
-Reminders go 7, 3 and 1 day(s) before:
+Reminders go 7, 3 and 1 day(s) before, plus on the day for tasks, meetings, shoots and memos
+(memos: only 1 day before and on the day):
   - tasks: their deadline (or end date for start -> end tasks), to the assignees; Done tasks skipped
   - shoots: the shoot date, to the team crew
   - brands: the next follow-up date, to whoever follows up; Confirmed / Declined skipped
   - meetings: the meeting date and time, to the team members attending
+  - memos: the memo date, to the people it's for (or whoever wrote it)
 Anything with no one (or no emails) goes to the admins.
 """
 import base64, datetime as dt, json, os, sys
@@ -18,7 +20,8 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 SITE = "https://yyleong511-png.github.io/campaign-tracker/"
 ADMIN_FALLBACK = "yyleong511@gmail.com"
-LEADS = {7: "in 1 week", 3: "in 3 days", 1: "tomorrow"}
+LEADS = {7: "in 1 week", 3: "in 3 days", 1: "tomorrow", 0: "today"}
+SAME_DAY = {"Task", "Meeting", "Shoot", "Memo"}  # also remind on the day itself
 MYT = dt.timezone(dt.timedelta(hours=8))
 
 
@@ -47,19 +50,20 @@ def main():
 
     def add(kind, title, due, hm, names, details):
         lead = (dt.date.fromisoformat(due) - today).days
-        if lead not in LEADS:
+        if lead not in LEADS or (lead == 0 and kind not in SAME_DAY) or (kind == "Memo" and lead not in (1, 0)):
             return
         to = sorted({emails[n] for n in names if n in emails}) or admins
         when = fmt_day(due) + ", " + fmt_time(hm)
         first = {"Task": f"Reminder: \"{title}\" is due {LEADS[lead]}.",
                  "Shoot": f"Reminder: the shoot \"{title}\" is {LEADS[lead]}.",
                  "Follow-up": f"Reminder: follow up with {title} {LEADS[lead]}.",
-                 "Meeting": f"Reminder: the meeting \"{title}\" is {LEADS[lead]}."}[kind]
+                 "Meeting": f"Reminder: the meeting \"{title}\" is {LEADS[lead]}.",
+                 "Memo": f"Reminder: \"{title}\" is {LEADS[lead]}."}[kind]
         lines = [first, "",
                  ("Due: " if kind == "Task" else "When: ") + when]
         lines += [x for x in details if x]
         lines += ["", "Campaign Tracker: " + SITE, "", "This is an automatic reminder from the Campaign Tracker."]
-        label = {"Task": f"{title} due", "Shoot": f"Shoot: {title}", "Follow-up": f"Follow up with {title}", "Meeting": f"Meeting: {title}"}[kind]
+        label = {"Task": f"{title} due", "Shoot": f"Shoot: {title}", "Follow-up": f"Follow up with {title}", "Meeting": f"Meeting: {title}", "Memo": f"Memo: {title[:60]}"}[kind]
         out.append({"to": to, "subject": f"Reminder: {label} {LEADS[lead]} ({fmt_day(due)[5:]})", "body": "\n".join(lines)})
 
     for t in d.get("tasks", []):
@@ -97,6 +101,14 @@ def main():
             "Until: " + fmt_time(m["endTime"]) if m.get("endTime") else "",
             "Location: " + m["location"] if m.get("location") else "",
             "Attending: " + ", ".join(names + ([m["others"]] if m.get("others") else [])) if (names or m.get("others")) else "",
+            "\n" + m["notes"] if m.get("notes") else ""])
+
+    for m in d.get("memos", []):
+        if m.get("done") or not m.get("date"):
+            continue
+        names = m.get("people") or ([m["by"]] if m.get("by") else [])
+        add("Memo", m.get("text", "Memo"), m["date"], m.get("time") or "09:00", names, [
+            "For: " + ", ".join(names) if names else "",
             "\n" + m["notes"] if m.get("notes") else ""])
 
     for b in d.get("outreach", []):
