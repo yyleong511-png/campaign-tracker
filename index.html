@@ -942,6 +942,82 @@ const FR_START = 8 * 60, FR_END = 22 * 60;
 let busyEdit = null; // {date, all, start, end}
 const toMin = hm => { const [h, m] = (hm || "0:0").split(":").map(Number); return h * 60 + m; };
 const minToHm = m => String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
+const addDays = (ymd, n) => { const t = new Date(ymd + "T12:00:00Z"); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
+// .ics import: reads only start/end times of busy events; titles and details are never kept.
+const KL_TZ = "Asia/Kuala_Lumpur";
+function wallToUtc(y, mo, d, h, mi, tz) { // wall-clock time in tz -> UTC ms
+  let t = Date.UTC(y, mo - 1, d, h, mi);
+  if (!tz) return t;
+  for (let k = 0; k < 2; k++) {
+    let p; try { p = Object.fromEntries(new Intl.DateTimeFormat("en-US", {timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit"}).formatToParts(new Date(t)).map(x => [x.type, x.value])); } catch (e) { return Date.UTC(y, mo - 1, d, h, mi) - 8 * 3600e3; }
+    const seen = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute);
+    t += Date.UTC(y, mo - 1, d, h, mi) - seen;
+  }
+  return t;
+}
+function icsTime(v, params) { // -> {ms} or {date:"YYYY-MM-DD"}
+  const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?(Z)?)?$/.exec(v.trim()); if (!m) return null;
+  if (!m[4]) return {date: `${m[1]}-${m[2]}-${m[3]}`};
+  const tz = m[7] ? null : ((/TZID=([^;:]+)/.exec(params || "") || [])[1] || KL_TZ).replace(/^"|"$/g, "");
+  return {ms: m[7] ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) : wallToUtc(+m[1], +m[2], +m[3], +m[4], +m[5], tz)};
+}
+const klParts = ms => { const k = new Date(ms + 8 * 3600e3).toISOString(); return [k.slice(0, 10), k.slice(11, 16)]; };
+function parseIcsBusy(text, fromDate, toDate) {
+  const lines = text.replace(/\r?\n[ \t]/g, "").split(/\r?\n/), evs = []; let ev = null;
+  for (const ln of lines) {
+    if (ln === "BEGIN:VEVENT") { ev = {ex: []}; continue; }
+    if (ln === "END:VEVENT") { if (ev) evs.push(ev); ev = null; continue; }
+    if (!ev) continue;
+    const i = ln.indexOf(":"); if (i < 0) continue;
+    const head = ln.slice(0, i), val = ln.slice(i + 1), name = head.split(";")[0].toUpperCase(), params = head.slice(name.length);
+    if (name === "DTSTART") ev.s = icsTime(val, params);
+    else if (name === "DTEND") ev.e = icsTime(val, params);
+    else if (name === "DURATION") ev.dur = val;
+    else if (name === "TRANSP") ev.transp = val.trim().toUpperCase();
+    else if (name === "STATUS") ev.status = val.trim().toUpperCase();
+    else if (name === "RRULE") ev.rrule = val.trim();
+    else if (name === "RECURRENCE-ID") ev.recur = true;
+    else if (name === "EXDATE") val.split(",").forEach(x => { const t = icsTime(x, params); if (t) ev.ex.push(t.date || klParts(t.ms)[0]); });
+  }
+  const out = [], durMs = d => { const m = /P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?/.exec(d || "") || []; return ((+m[1] || 0) * 7 * 864e5) + ((+m[2] || 0) * 864e5) + ((+m[3] || 0) * 36e5) + ((+m[4] || 0) * 6e4); };
+  const push = (sMs, eMs) => { // split across Malaysia days
+    for (let t = sMs; t < eMs;) {
+      const [dt, hm] = klParts(t), dayEnd = Date.parse(addDays(dt, 1) + "T00:00:00+08:00"), stop = Math.min(eMs, dayEnd);
+      if (dt >= fromDate && dt <= toDate) out.push({date: dt, start: hm, end: stop === dayEnd ? "24:00" : klParts(stop)[1]});
+      t = stop;
+    }
+  };
+  for (const e of evs) {
+    if (!e.s || e.transp === "TRANSPARENT" || e.status === "CANCELLED") continue;
+    const allDay = !!e.s.date;
+    const s0 = allDay ? Date.parse(e.s.date + "T00:00:00+08:00") : e.s.ms;
+    let len = e.e ? (e.e.date ? Date.parse(e.e.date + "T00:00:00+08:00") : e.e.ms) - s0 : e.dur ? durMs(e.dur) : allDay ? 864e5 : 0;
+    if (len <= 0) continue;
+    const r = {}; (e.rrule || "").split(";").forEach(kv => { const [k, v] = kv.split("="); if (k) r[k.toUpperCase()] = v; });
+    const freq = r.FREQ, step = Math.max(1, +r.INTERVAL || 1), count = +r.COUNT || 0;
+    const until = r.UNTIL ? (t => t && (t.date || klParts(t.ms)[0]))(icsTime(r.UNTIL, "")) : null;
+    if (!freq || e.recur) { push(s0, s0 + len); continue; }
+    if (!["DAILY", "WEEKLY", "MONTHLY", "YEARLY"].includes(freq)) { push(s0, s0 + len); continue; }
+    const DAYS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"], byday = r.BYDAY ? r.BYDAY.split(",").map(x => DAYS.indexOf(x.slice(-2))) : null;
+    const [d0] = klParts(s0), offs = s0 - Date.parse(d0 + "T00:00:00+08:00"), w0 = new Date(d0 + "T12:00:00Z").getUTCDay();
+    let n = 0;
+    for (let k = 0; k < 3700; k++) {
+      const dt = addDays(d0, k);
+      if (dt > toDate || (until && dt > until)) break;
+      const wd = new Date(dt + "T12:00:00Z").getUTCDay(), diff = k, [y0, m0, dd0] = d0.split("-").map(Number), [y, m, dd] = dt.split("-").map(Number);
+      let hit = false;
+      if (freq === "DAILY") hit = diff % step === 0 && (!byday || byday.includes(wd));
+      else if (freq === "WEEKLY") { const wk = Math.floor((diff + ((w0 + 6) % 7)) / 7); hit = wk % step === 0 && (byday ? byday.includes(wd) : wd === w0); }
+      else if (freq === "MONTHLY") hit = dd === dd0 && ((y - y0) * 12 + (m - m0)) % step === 0;
+      else hit = dd === dd0 && m === m0 && (y - y0) % step === 0;
+      if (!hit) continue;
+      n++; if (count && n > count) break;
+      if (e.ex.includes(dt)) continue;
+      const st = Date.parse(dt + "T00:00:00+08:00") + offs; push(st, st + len);
+    }
+  }
+  return out;
+}
 function busyFor(d, name, date) {
   const out = [];
   (d.busy || []).forEach(b => b.who === name && b.date === date && out.push({a: toMin(b.start), b: b.end === "24:00" ? 1440 : toMin(b.end), kind: "busy", src: b.src}));
@@ -970,13 +1046,15 @@ function whoFreeHtml(d) {
   }).join("");
   const free = freeSlots(all);
   const mine = me ? (d.busy || []).map((b, i) => [b, i]).filter(([b]) => b.src === "manual" && b.who === me.name && b.date === date) : [];
+  const imported = me ? (d.busy || []).filter(b => b.src === "import" && b.who === me.name).length : 0;
   const sync = d.busySync || {}, synced = team.filter(m => sync[m.name] && sync[m.name].status === "ok").map(m => m.name);
   return `<h2>${T("Who's free")}</h2>
     <div class="card">${rows}
       <div class="fr-ticks"><span>8</span><span>11</span><span>14</span><span>17</span><span>20</span><span>22</span></div>
       <div class="legend" style="margin:8px 0 0"><span><i style="background:#DCF3E3"></i>${T("Free")}</span><span><i style="background:#9AA0B4"></i>${T("Busy")}</span><span><i style="background:${KIND_COLOR.Meeting}"></i>${T("Team event")}</span></div>
       <div class="freebox">${free.length ? T("Everyone free: {slots}", {slots: free.map(([a, b]) => fmtTime(minToHm(a)) + "–" + fmtTime(minToHm(b === 1440 ? 1439 : b))).join(" · ")}) : T("No time when everyone is free (8 am – 10 pm).")}</div>
-      ${mine.length ? mine.map(([b, i]) => `<div class="busybtn"><span>${T("You're busy")}: ${b.start === "00:00" && b.end === "24:00" ? T("All day") : esc(fmtTime(b.start)) + "–" + esc(fmtTime(b.end === "24:00" ? "23:59" : b.end))}</span><button data-busydel="${i}" style="min-height:36px;padding:6px 12px;background:var(--badbg);color:var(--bad)">${T("Remove")}</button></div>`).join("") : ""}
+      ${mine.length ? mine.map(([b, i]) => `<div class="busybtn"><span>${T("You're busy")}: ${b.start === "00:00" && b.end === "24:00" ? T("All day") : esc(fmtTime(b.start)) + "–" + esc(fmtTime(b.end === "24:00" ? "23:59" : b.end))}</span><span style="display:flex;gap:6px">${b.rep ? `<button data-busyrep="${esc(b.rep)}" style="min-height:36px;padding:6px 10px;background:var(--badbg);color:var(--bad)">${T("Remove all repeats")}</button>` : ""}<button data-busydel="${i}" style="min-height:36px;padding:6px 12px;background:var(--badbg);color:var(--bad)">${T("Remove")}</button></span></div>`).join("") : ""}
+      ${imported ? `<div class="busybtn"><span>${T("Imported from your calendar file: {n}", {n: imported})}</span><button data-busyimp="1" style="min-height:36px;padding:6px 12px;background:var(--badbg);color:var(--bad)">${T("Remove")}</button></div>` : ""}
       ${me && can ? `<button class="wide" data-busy="new" style="margin-top:10px">${T("I'm busy")}</button>` : ""}
       <div class="mute small" style="margin-top:8px">${synced.length ? T("Synced from Google Calendar: {names}", {names: synced.join(", ")}) : T("No one's calendar is synced yet. See Profile → Calendar sync.")}</div>
     </div>`;
@@ -991,9 +1069,17 @@ function busyFormHtml() {
       ${b.all ? "" : `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
         <label>${T("From")}<input id="bz-start" type="time" value="${esc(b.start)}" required></label>
         <label>${T("To")}<input id="bz-end" type="time" value="${esc(b.end)}" required></label></div>`}
+      <label>${T("Repeat")}<select id="bz-rep">
+        ${[["none","Does not repeat"],["daily","Every day"],["weekdays","Every weekday (Mon–Fri)"],["weekly","Every week"]].map(([v, l]) => `<option value="${v}" ${b.rep === v ? "selected" : ""}>${T(l)}</option>`).join("")}</select></label>
+      ${b.rep && b.rep !== "none" ? `<label>${T("Until")}<input id="bz-until" type="date" value="${esc(b.until || "")}" required></label>` : ""}
       <button class="wide primary" type="submit">${T("Save")}</button>
       <button class="wide" type="button" data-busy="cancel">${T("Cancel")}</button>
-    </form>`;
+    </form>
+    <h2>${T("Import from a calendar file")}</h2>
+    <div class="card">
+      <div class="mute small">${T("@icsimport")}</div>
+      <label class="wide" style="display:block;text-align:center;border-radius:14px;font-weight:600;padding:12px;margin-top:10px;background:var(--bg);color:var(--ink);cursor:pointer">${T("Choose .ics file")}<input id="bz-ics" type="file" accept=".ics,text/calendar" hidden></label>
+    </div>`;
 }
 function rerenderSchedule() { $("s-schedule").innerHTML = scheduleHtml(lastData); }
 function rerenderTasks() { $("s-tasks").innerHTML = tasksHtml(lastData); }
@@ -1412,8 +1498,15 @@ $("main").addEventListener("click", async ev => {
     render(lastData); show("overview"); return;
   }
   if (b.dataset.busy) {
-    if (b.dataset.busy === "new") { busyEdit = {date: cal.sel, all: false, start: "09:00", end: "18:00"}; rerenderSchedule(); window.scrollTo(0, 0); return; }
+    if (b.dataset.busy === "new") { busyEdit = {date: cal.sel, all: false, start: "09:00", end: "18:00", rep: "none", until: ""}; rerenderSchedule(); window.scrollTo(0, 0); return; }
     if (b.dataset.busy === "cancel") { busyEdit = null; rerenderSchedule(); return; }
+  }
+  if (b.dataset.busyrep || b.dataset.busyimp) {
+    const me = findMe(lastData); if (!me) return; b.disabled = true;
+    const r = b.dataset.busyrep, keep = y => !(y.who === me.name && (r ? y.rep === r : y.src === "import"));
+    try { const d = await publish(x => { x.busy = (x.busy || []).filter(keep); }, r ? "Remove repeating busy time" : "Remove imported busy times"); showApp(d); show("schedule"); toast("Removed."); }
+    catch (e) { toast("Could not save. Try again."); b.disabled = false; }
+    return;
   }
   if (b.dataset.busydel !== undefined) {
     const blk = (lastData.busy || [])[+b.dataset.busydel]; if (!blk) return; b.disabled = true;
@@ -1643,10 +1736,27 @@ $("main").addEventListener("submit", async ev => {
   catch (e) { toast("Could not save. Try again."); btn.disabled = false; }
 }, true);
 $("main").addEventListener("change", ev => {
-  if (ev.target.id !== "bz-all") return;
-  busyEdit.date = $("bz-date").value; busyEdit.all = ev.target.checked;
+  if (ev.target.id !== "bz-all" && ev.target.id !== "bz-rep") return;
+  busyEdit.date = $("bz-date").value; busyEdit.all = $("bz-all").checked; busyEdit.rep = $("bz-rep").value;
+  if ($("bz-until")) busyEdit.until = $("bz-until").value;
+  if (busyEdit.rep !== "none" && !busyEdit.until && busyEdit.date) busyEdit.until = addDays(busyEdit.date, 27);
   if ($("bz-start")) { busyEdit.start = $("bz-start").value; busyEdit.end = $("bz-end").value; }
   rerenderSchedule();
+});
+$("main").addEventListener("change", async ev => {
+  if (ev.target.id !== "bz-ics") return;
+  const f = ev.target.files && ev.target.files[0], me = findMe(lastData); if (!f || !me) return;
+  if (f.size > 20 * 1024 * 1024) { toast("That file is too big."); return; }
+  let blocks;
+  try { const from = todayKL(), to = addDays(from, 90); blocks = parseIcsBusy(await f.text(), from, to); }
+  catch (e) { toast("Could not read that calendar file."); return; }
+  if (!blocks.length) { toast("No busy times found in the next 3 months."); ev.target.value = ""; return; }
+  const seen = new Set(); blocks = blocks.filter(b => { const k = b.date + b.start + b.end; if (seen.has(k)) return false; seen.add(k); return true; });
+  try {
+    const base = Date.now().toString(36);
+    const d = await publish(x => { x.busy = (x.busy || []).filter(y => !(y.who === me.name && y.src === "import")).concat(blocks.map((b, k) => ({who: me.name, date: b.date, start: b.start, end: b.end, src: "import", id: base + "i" + k}))); }, "Import busy times");
+    busyEdit = null; showApp(d); show("schedule"); toast(T("Imported {n} busy times.", {n: blocks.length}));
+  } catch (e) { toast(e.message === "notoken" ? "Uploads need team updates turned on." : "Could not save. Try again."); }
 });
 $("main").addEventListener("submit", async ev => {
   if (ev.target.id !== "bz-form") return;
@@ -1656,9 +1766,19 @@ $("main").addEventListener("submit", async ev => {
   const start = all ? "00:00" : $("bz-start").value, end = all ? "24:00" : $("bz-end").value;
   if (!date) { toast("Date is needed."); return; }
   if (!all && end <= start) { toast("End time is before the start time."); return; }
+  const rp = $("bz-rep").value, until = $("bz-until") ? $("bz-until").value : "";
+  if (rp !== "none" && (!until || until < date)) { toast("Pick an end date after the start date."); return; }
+  if (rp !== "none" && until > addDays(date, 180)) { toast("Repeats can go up to 6 months."); return; }
+  const dates = [];
+  for (let x = date; x <= (rp === "none" ? date : until); x = addDays(x, 1)) {
+    const wd = new Date(x + "T12:00:00Z").getUTCDay(), w0 = new Date(date + "T12:00:00Z").getUTCDay();
+    if (rp === "none" || rp === "daily" || (rp === "weekdays" && wd >= 1 && wd <= 5) || (rp === "weekly" && wd === w0)) dates.push(x);
+  }
+  if (!dates.length) { toast("No days match. Check the dates."); return; }
   const btn = ev.target.querySelector("button[type=submit]"); btn.disabled = true;
   try {
-    const d = await publish(x => { (x.busy = x.busy || []).push({who: me.name, date, start, end, src: "manual", id: Date.now().toString(36)}); }, "Add busy time");
+    const base = Date.now().toString(36), rid = rp === "none" ? null : "r" + base;
+    const d = await publish(x => { x.busy = x.busy || []; dates.forEach((dt, k) => { const o = {who: me.name, date: dt, start, end, src: "manual", id: base + k}; if (rid) o.rep = rid; x.busy.push(o); }); }, dates.length > 1 ? "Add repeating busy time" : "Add busy time");
     busyEdit = null; cal.sel = date; cal.y = +date.slice(0, 4); cal.m = +date.slice(5, 7) - 1; showApp(d); show("schedule"); toast("Saved.");
   } catch (e) { toast(e.message === "notoken" ? "Uploads need team updates turned on." : "Could not save. Try again."); btn.disabled = false; }
 }, true);

@@ -1,6 +1,7 @@
 // Interface text in Chinese. Keys are the English text shown on screen.
 // "@..." keys hold longer passages with formatting, in both languages.
 window.__EN = {
+  "@icsimport": "Works without any sync. Upload a calendar file (.ics) and only the start and end times of your busy events in the next 3 months are saved, never titles or details. Uploading again replaces the last import. <b>Google Calendar:</b> on a computer open calendar.google.com → ⚙ Settings → <b>Import &amp; export</b> → <b>Export</b>, unzip and pick your .ics file. <b>Outlook / Apple Calendar on Mac:</b> File → Export.",
   "@sync1": "Open <b>Google Calendar settings</b> in your phone's browser (the app can't change sharing).",
   "@sync2": "Under <b>Settings for my calendars</b>, tap your calendar → <b>Share with specific people</b> → <b>Add people</b>.",
   "@sync3": "Enter <b>{email}</b> and choose <b>See only free/busy (hide details)</b>.",
@@ -14,6 +15,12 @@ window.__EN = {
 };
 window.__ZH = {
   // passages
+  "@icsimport": "不需要任何同步也能用。上传日历文件（.ics），只会保存接下来 3 个月忙碌活动的开始和结束时间，绝不保存标题或内容。再上传一次会取代上一次导入。<b>Google 日历：</b>用电脑打开 calendar.google.com → ⚙ 设置 → <b>导入和导出</b> → <b>导出</b>，解压后选那个 .ics 文件。<b>Outlook / Mac 日历：</b>文件 → 导出。",
+  "Repeat": "重复", "Does not repeat": "不重复", "Every day": "每天", "Every weekday (Mon–Fri)": "每个工作日（周一到周五）", "Every week": "每周",
+  "Until": "直到", "Remove all repeats": "删除全部重复", "Import from a calendar file": "从日历文件导入", "Choose .ics file": "选择 .ics 文件",
+  "Imported from your calendar file: {n}": "从日历文件导入：{n} 个时段", "Imported {n} busy times.": "已导入 {n} 个忙碌时段。",
+  "That file is too big.": "文件太大了。", "Could not read that calendar file.": "读不了这个日历文件。", "No busy times found in the next 3 months.": "接下来 3 个月没有找到忙碌时间。",
+  "Pick an end date after the start date.": "结束日期要在开始日期之后。", "Repeats can go up to 6 months.": "重复最多 6 个月。", "No days match. Check the dates.": "没有符合的日子，请检查日期。",
   "@big1": "点 <b>Open Google Drive</b>，把文件上传到那里。",
   "@big1team": "点 <b>Open Google Drive</b>，把文件上传到那里（团队共用文件夹）。",
   "@big2": "在 Drive 里点文件旁的 <b>⋮</b> → <b>共享</b> → 设成团队可以打开 → <b>复制链接</b>。",
