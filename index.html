@@ -206,6 +206,13 @@ nav{padding-left:calc(16px + env(safe-area-inset-left));padding-right:calc(16px 
 .memo:first-child{border-top:0;padding-top:2px}
 .memo input[type=checkbox]{width:24px;height:24px;margin:2px 0 0;accent-color:var(--accent);flex:none}
 .memo.done .u{text-decoration:line-through;color:var(--mute)}
+.fr-row{display:flex;align-items:center;gap:10px;padding:7px 0}
+.fr-name{flex:none;width:64px;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fr-bar{flex:1;position:relative;height:22px;border-radius:7px;background:#DCF3E3;overflow:hidden}
+.fr-bar i{position:absolute;top:0;bottom:0;display:block}
+.fr-ticks{display:flex;justify-content:space-between;margin-left:74px;font-size:10px;color:var(--mute)}
+.freebox{margin-top:10px;border-radius:14px;background:#DCF3E3;color:#14532D;padding:10px 12px;font-size:13px;font-weight:600}
+.busybtn{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px solid var(--line);font-size:13px}
 .langbtn{width:44px;height:44px;padding:0;border-radius:50%;font-size:13px;font-weight:700;color:var(--tintink);background:var(--panel);flex:none}
 #langlock{position:fixed;top:calc(12px + env(safe-area-inset-top));right:calc(12px + env(safe-area-inset-right));z-index:6;box-shadow:0 2px 10px rgba(23,26,43,.1)}
 html[lang="zh-Hans"] body{font-family:var(--font),"PingFang SC","Hiragino Sans GB","Noto Sans CJK SC","Microsoft YaHei",sans-serif}
@@ -853,6 +860,7 @@ function icsHref(e) {
 }
 function scheduleHtml(d) {
   if (memoEdit) return memoEditorHtml(d);
+  if (busyEdit) return busyFormHtml();
   const today = todayKL();
   if (!cal) cal = {y: +today.slice(0, 4), m: +today.slice(5, 7) - 1, sel: today};
   const ev = allEvents(d).filter(e => calFilter === "All" || e.kind === calFilter), byDay = {};
@@ -878,6 +886,7 @@ function scheduleHtml(d) {
     <h2>${esc(fmtDate(cal.sel))}</h2>
     ${admin || can ? `<div class="mini" style="margin-top:0">${admin ? `<button data-rec="new" data-col="meetings" data-back="schedule" style="background:var(--accent);color:#fff">${T("+ Meeting")}</button><button data-rec="new" data-col="shoots" data-back="schedule" style="background:${KIND_COLOR.Shoot};color:#fff">${T("+ Shoot")}</button>` : ""}${can ? `<button data-memo="new" style="background:var(--panel)">${T("+ Memo")}</button>` : ""}</div>` : ""}
     ${dayEv.length ? `<div class="card">${dayEv.map(e => evRow(e, false, admin)).join("")}</div>` : empty("Nothing on this day.")}
+    ${whoFreeHtml(d)}
     <h2>${T("Upcoming")}</h2>
     ${(() => { const up = ev.filter(e => e.date >= today).sort((a, b) => (a.date + (a.time || "00:00")).localeCompare(b.date + (b.time || "00:00"))).slice(0, 15);
       return up.length ? `<div class="card">${up.map(e => evRow(e, true, admin)).join("")}</div>` : empty("Nothing coming up."); })()}
@@ -926,6 +935,64 @@ function memoEditorHtml(d) {
       <button class="wide primary" type="submit">${T("Save")}</button>
       <button class="wide" type="button" data-memo="cancel">${T("Cancel")}</button>
       ${memoEdit.i >= 0 ? `<button class="rm" type="button" data-memo="delete">${T("Delete")}</button>` : ""}
+    </form>`;
+}
+// ---- Who's free: busy times per person (times only, no details) ----
+const FR_START = 8 * 60, FR_END = 22 * 60;
+let busyEdit = null; // {date, all, start, end}
+const toMin = hm => { const [h, m] = (hm || "0:0").split(":").map(Number); return h * 60 + m; };
+const minToHm = m => String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
+function busyFor(d, name, date) {
+  const out = [];
+  (d.busy || []).forEach(b => b.who === name && b.date === date && out.push({a: toMin(b.start), b: b.end === "24:00" ? 1440 : toMin(b.end), kind: "busy", src: b.src}));
+  const add = (people, dte, t0, t1, kind) => { if (dte === date && (people || []).includes(name)) { const a = toMin(t0 || "09:00"); out.push({a, b: t1 ? toMin(t1) : a + 60, kind}); } };
+  (d.meetings || []).forEach(m => add(m.people, m.date, m.time, m.endTime || (m.time ? minToHm(Math.min(1440, toMin(m.time) + 60)) : ""), "Meeting"));
+  (d.shoots || []).forEach(x => add(x.people, x.date, x.time, x.endTime || minToHm(Math.min(1440, toMin(x.time || "09:00") + 120)), "Shoot"));
+  (d.memos || []).forEach(m => { if (!m.done && m.time) add(m.people, m.date, m.time, minToHm(Math.min(1440, toMin(m.time) + 30)), "Memo"); });
+  return out;
+}
+function freeSlots(blocks) {
+  const iv = blocks.map(x => [Math.max(FR_START, x.a), Math.min(FR_END, x.b)]).filter(x => x[1] > x[0]).sort((p, q) => p[0] - q[0]);
+  const free = []; let cur = FR_START;
+  for (const [a, b] of iv) { if (a - cur >= 30) free.push([cur, a]); cur = Math.max(cur, b); }
+  if (FR_END - cur >= 30) free.push([cur, FR_END]);
+  return free;
+}
+function whoFreeHtml(d) {
+  const team = (d.team || []).filter(m => m.name), me = findMe(d), can = canWrite(d), date = cal.sel;
+  if (!team.length) return "";
+  const pct = m => ((Math.max(FR_START, Math.min(FR_END, m)) - FR_START) / (FR_END - FR_START) * 100).toFixed(2);
+  let all = [];
+  const rows = team.map(m => {
+    const bl = busyFor(d, m.name, date); all = all.concat(bl);
+    return `<div class="fr-row"><div class="fr-name u" title="${esc(m.name)}">${esc(m.name)}</div><div class="fr-bar" role="img" aria-label="${esc(m.name)}: ${bl.length ? T("busy at times") : T("free all day")}">
+      ${bl.map(x => `<i style="left:${pct(x.a)}%;width:${(pct(x.b) - pct(x.a)).toFixed(2)}%;background:${x.kind === "busy" ? "#9AA0B4" : KIND_COLOR[x.kind]}"></i>`).join("")}</div></div>`;
+  }).join("");
+  const free = freeSlots(all);
+  const mine = me ? (d.busy || []).map((b, i) => [b, i]).filter(([b]) => b.src === "manual" && b.who === me.name && b.date === date) : [];
+  const sync = d.busySync || {}, synced = team.filter(m => sync[m.name] && sync[m.name].status === "ok").map(m => m.name);
+  return `<h2>${T("Who's free")}</h2>
+    <div class="card">${rows}
+      <div class="fr-ticks"><span>8</span><span>11</span><span>14</span><span>17</span><span>20</span><span>22</span></div>
+      <div class="legend" style="margin:8px 0 0"><span><i style="background:#DCF3E3"></i>${T("Free")}</span><span><i style="background:#9AA0B4"></i>${T("Busy")}</span><span><i style="background:${KIND_COLOR.Meeting}"></i>${T("Team event")}</span></div>
+      <div class="freebox">${free.length ? T("Everyone free: {slots}", {slots: free.map(([a, b]) => fmtTime(minToHm(a)) + "–" + fmtTime(minToHm(b === 1440 ? 1439 : b))).join(" · ")}) : T("No time when everyone is free (8 am – 10 pm).")}</div>
+      ${mine.length ? mine.map(([b, i]) => `<div class="busybtn"><span>${T("You're busy")}: ${b.start === "00:00" && b.end === "24:00" ? T("All day") : esc(fmtTime(b.start)) + "–" + esc(fmtTime(b.end === "24:00" ? "23:59" : b.end))}</span><button data-busydel="${i}" style="min-height:36px;padding:6px 12px;background:var(--badbg);color:var(--bad)">${T("Remove")}</button></div>`).join("") : ""}
+      ${me && can ? `<button class="wide" data-busy="new" style="margin-top:10px">${T("I'm busy")}</button>` : ""}
+      <div class="mute small" style="margin-top:8px">${synced.length ? T("Synced from Google Calendar: {names}", {names: synced.join(", ")}) : T("No one's calendar is synced yet. See Profile → Calendar sync.")}</div>
+    </div>`;
+}
+function busyFormHtml() {
+  const b = busyEdit;
+  return `<h2>${T("I'm busy")}</h2>
+    <form class="card ed" id="bz-form" autocomplete="off" style="border:0">
+      <div class="mute small">${T("Only the time is shared, not the reason.")}</div>
+      <label>${T("Date")}<input id="bz-date" type="date" value="${esc(b.date)}" required></label>
+      <label class="chk"><input type="checkbox" id="bz-all" ${b.all ? "checked" : ""}>${T("All day")}</label>
+      ${b.all ? "" : `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <label>${T("From")}<input id="bz-start" type="time" value="${esc(b.start)}" required></label>
+        <label>${T("To")}<input id="bz-end" type="time" value="${esc(b.end)}" required></label></div>`}
+      <button class="wide primary" type="submit">${T("Save")}</button>
+      <button class="wide" type="button" data-busy="cancel">${T("Cancel")}</button>
     </form>`;
 }
 function rerenderSchedule() { $("s-schedule").innerHTML = scheduleHtml(lastData); }
@@ -1344,6 +1411,16 @@ $("main").addEventListener("click", async ev => {
     else { readOffer(); if (v === "add") offerEdit.deliverables.push({item: "", spec: ""}); if (v === "rm") offerEdit.deliverables.splice(+b.dataset.i, 1); }
     render(lastData); show("overview"); return;
   }
+  if (b.dataset.busy) {
+    if (b.dataset.busy === "new") { busyEdit = {date: cal.sel, all: false, start: "09:00", end: "18:00"}; rerenderSchedule(); window.scrollTo(0, 0); return; }
+    if (b.dataset.busy === "cancel") { busyEdit = null; rerenderSchedule(); return; }
+  }
+  if (b.dataset.busydel !== undefined) {
+    const blk = (lastData.busy || [])[+b.dataset.busydel]; if (!blk) return; b.disabled = true;
+    try { const d = await publish(x => { x.busy = (x.busy || []).filter(y => !(y.id === blk.id && y.who === blk.who)); }, "Remove busy time"); showApp(d); show("schedule"); toast("Removed."); }
+    catch (e) { toast("Could not save. Try again."); b.disabled = false; }
+    return;
+  }
   if (b.dataset.cfil) { calFilter = b.dataset.cfil; rerenderSchedule(); return; }
   if (b.dataset.day) { cal.sel = b.dataset.day; const [y, m] = cal.sel.split("-").map(Number); cal.y = y; cal.m = m - 1; rerenderSchedule(); return; }
   if (b.dataset.cal) {
@@ -1565,6 +1642,26 @@ $("main").addEventListener("submit", async ev => {
   try { const d = await publish(x => { if (v) x.driveFolder = v; else delete x.driveFolder; }, "Set team Drive folder"); showApp(d); history.replaceState(null, "", "#admin"); show("admin"); toast("Saved."); }
   catch (e) { toast("Could not save. Try again."); btn.disabled = false; }
 }, true);
+$("main").addEventListener("change", ev => {
+  if (ev.target.id !== "bz-all") return;
+  busyEdit.date = $("bz-date").value; busyEdit.all = ev.target.checked;
+  if ($("bz-start")) { busyEdit.start = $("bz-start").value; busyEdit.end = $("bz-end").value; }
+  rerenderSchedule();
+});
+$("main").addEventListener("submit", async ev => {
+  if (ev.target.id !== "bz-form") return;
+  ev.preventDefault(); ev.stopImmediatePropagation();
+  const me = findMe(lastData); if (!me) return;
+  const date = $("bz-date").value, all = $("bz-all").checked;
+  const start = all ? "00:00" : $("bz-start").value, end = all ? "24:00" : $("bz-end").value;
+  if (!date) { toast("Date is needed."); return; }
+  if (!all && end <= start) { toast("End time is before the start time."); return; }
+  const btn = ev.target.querySelector("button[type=submit]"); btn.disabled = true;
+  try {
+    const d = await publish(x => { (x.busy = x.busy || []).push({who: me.name, date, start, end, src: "manual", id: Date.now().toString(36)}); }, "Add busy time");
+    busyEdit = null; cal.sel = date; cal.y = +date.slice(0, 4); cal.m = +date.slice(5, 7) - 1; showApp(d); show("schedule"); toast("Saved.");
+  } catch (e) { toast(e.message === "notoken" ? "Uploads need team updates turned on." : "Could not save. Try again."); btn.disabled = false; }
+}, true);
 $("main").addEventListener("change", async ev => {
   if (ev.target.dataset.mdone === undefined) return;
   const cb = ev.target, m = (lastData.memos || [])[+cb.dataset.mdone]; if (!m) return;
@@ -1678,6 +1775,20 @@ function profileHtml(d) {
       <div class="mute small">Review team updates and manage the team.</div>
       <button class="wide primary" id="pf-admin">${T("Open admin")}${(d.inbox || []).length ? " · " + T("{n} to review", {n: (d.inbox || []).length}) : ""}</button>
     </div>` : ""}
+    ${me ? (() => { const st = (d.busySync || {})[me.name], admin = (d.team || []).find(m => m.admin && (m.email || m.name));
+      const adminEmail = (admin && admin.email) || "yyleong511@gmail.com";
+      return `<h2>${T("Calendar sync")}</h2>
+    <div class="card">
+      <div style="font-weight:700">${st && st.status === "ok" ? T("Synced") + " ✓" : st && st.status === "no_access" ? T("Not shared yet") : T("Not connected yet")}</div>
+      <div class="mute small" style="margin-top:2px">${st && st.at ? T("Last checked {when}", {when: fmtWhen(st.at)}) : T("Share when you're busy so the team can see who's free. Only times are shared, never what the event is.")}</div>
+      <ol style="margin:12px 0 0;padding-left:20px;line-height:1.55;font-size:14px">
+        <li>${T("@sync1")}</li>
+        <li>${T("@sync2")}</li>
+        <li>${T("@sync3", {email: esc(adminEmail)})}</li>
+        <li>${T("@sync4")}</li></ol>
+      <a class="wide" href="https://calendar.google.com/calendar/r/settings" target="_blank" rel="noopener" style="display:block;text-align:center;text-decoration:none;border-radius:14px;font-weight:600;padding:12px;margin-top:10px;background:var(--bg);color:var(--ink)">${T("Open Google Calendar settings")}</a>
+      <div class="tipbox" style="background:var(--tint);color:var(--tintink)">${T("@synciphone")}</div>
+    </div>`; })() : ""}
     <h2>Face ID / fingerprint</h2>
     <div class="card">
       <div class="mute small">${p.bio ? "On for this phone. You can still use your personal password." : bioOk ? "Unlock with Face ID, fingerprint or your phone screen lock instead of typing your password." : "This browser does not support it. Keep using your personal password."}</div>

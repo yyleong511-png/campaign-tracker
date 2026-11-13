@@ -1,5 +1,5 @@
 // App shell only. The encrypted data file is never cached, so the team always sees the latest update.
-const CACHE = "ct-shell-v24";
+const CACHE = "ct-shell-v25";
 const SHELL = ["./", "index.html", "i18n.js", "manifest.webmanifest", "icons/ct-192.png", "icons/ct-512.png", "icons/ct-180.png", "icons/ct-32.png"];
 
 self.addEventListener("install", e => {

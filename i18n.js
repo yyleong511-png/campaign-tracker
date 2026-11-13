@@ -1,6 +1,11 @@
 // Interface text in Chinese. Keys are the English text shown on screen.
 // "@..." keys hold longer passages with formatting, in both languages.
 window.__EN = {
+  "@sync1": "Open <b>Google Calendar settings</b> in your phone's browser (the app can't change sharing).",
+  "@sync2": "Under <b>Settings for my calendars</b>, tap your calendar → <b>Share with specific people</b> → <b>Add people</b>.",
+  "@sync3": "Enter <b>{email}</b> and choose <b>See only free/busy (hide details)</b>.",
+  "@sync4": "Tap <b>Send</b>. Your busy times appear here within a few hours.",
+  "@synciphone": "<b>On iPhone?</b> Your iPhone calendar can't share busy times by itself. Easiest: go to <b>Settings → Calendar → Accounts → Add Account → Google</b>, turn on <b>Calendars</b>, then set <b>Settings → Calendar → Default Calendar</b> to your Gmail calendar and do the steps above. New events will sync. Or just mark times in <b>Schedule → Who's free → I'm busy</b>.",
   "@big1": "Tap <b>Open Google Drive</b> and upload the file there.",
   "@big1team": "Tap <b>Open Google Drive</b> and upload the file there (our team folder).",
   "@big2": "In Drive, tap <b>⋮</b> on the file → <b>Share</b> → set access so the team can open it → <b>Copy link</b>.",
@@ -14,6 +19,12 @@ window.__ZH = {
   "@big2": "在 Drive 里点文件旁的 <b>⋮</b> → <b>共享</b> → 设成团队可以打开 → <b>复制链接</b>。",
   "@big3": "回到这里，把链接贴在下面，然后点 <b>保存链接</b>。",
   "@ppttip": "<b>想拿给客户看？</b>投影片没办法在这里全屏播放。请先导出成 PDF（PowerPoint、Keynote 或 Google Slides：导出 / 下载 → PDF），再把 PDF 一起上传。投影片里的动画和视频不会保留。",
+
+  "@sync1": "用手机浏览器打开 <b>Google Calendar 设定</b>（Google Calendar app 改不了分享设定）。",
+  "@sync2": "在 <b>我的日历的设置</b> 里点你的日历 → <b>与特定人员共享</b> → <b>添加人员</b>。",
+  "@sync3": "输入 <b>{email}</b>，权限选 <b>只查看忙/闲状态（隐藏详细信息）</b>。",
+  "@sync4": "点 <b>发送</b>。几个小时内你的忙碌时间就会出现在这里。",
+  "@synciphone": "<b>用 iPhone？</b>iPhone 自带日历没办法单独分享忙碌时间。最简单的做法：到 <b>设置 → 日历 → 账户 → 添加账户 → Google</b>，打开 <b>日历</b>，再把 <b>设置 → 日历 → 默认日历</b> 改成你的 Gmail 日历，然后做上面的步骤，之后新增的活动就会同步。或者直接在 <b>日程 → 谁有空 → 我没空</b> 手动标记。",
 
   // with values
   "Hi {name}": "你好，{name}",
@@ -35,7 +46,17 @@ window.__ZH = {
   "Item {n}": "项目 {n}", "Step {n}": "步骤 {n}", "Remove item {n}": "删除项目 {n}",
   "Files over {max} go here. Paste the link of a shared Drive folder so everyone uploads to the same place.": "超过 {max} 的文件放这里。贴上共用 Drive 文件夹的链接，大家就会上传到同一个地方。",
   "Present file": "全屏展示文件",
-  "Schedule": "日程", "Upcoming": "接下来", "Nothing coming up.": "接下来没有安排。", "+ Shoot": "+ 拍摄",
+  "Schedule": "日程",
+  "Who's free": "谁有空", "busy at times": "有些时段忙", "free all day": "全天有空", "Free": "有空", "Busy": "忙", "Team event": "团队安排",
+  "Everyone free: {slots}": "大家都有空：{slots}", "No time when everyone is free (8 am – 10 pm).": "早上 8 点到晚上 10 点，没有大家都有空的时间。",
+  "You're busy": "你没空", "I'm busy": "我没空", "Only the time is shared, not the reason.": "只会显示时间，不会显示原因。",
+  "From": "从", "To": "到", "Removed.": "已删除。",
+  "Synced from Google Calendar: {names}": "已同步 Google 日历：{names}", "No one's calendar is synced yet. See Profile → Calendar sync.": "还没有人同步日历。请看 个人页 → 日历同步。",
+  "Calendar sync": "日历同步", "Synced": "已同步", "Not shared yet": "还没分享", "Not connected yet": "还没连接",
+  "Last checked {when}": "上次检查：{when}",
+  "Share when you're busy so the team can see who's free. Only times are shared, never what the event is.": "分享你什么时候忙，团队就能看到谁有空。只分享时间，不会显示是什么活动。",
+  "Open Google Calendar settings": "打开 Google 日历设定",
+  "Using the iPhone calendar only? Mark busy times in Schedule → Who's free → I'm busy.": "只用 iPhone 自带日历？请在 日程 → 谁有空 → 我没空 手动标记。", "Upcoming": "接下来", "Nothing coming up.": "接下来没有安排。", "+ Shoot": "+ 拍摄",
   "Follow-ups": "跟进", "Show": "显示", "Today": "今天", "Previous month": "上个月", "Next month": "下个月",
   "+ Meeting": "+ 会议", "+ Memo": "+ 备忘", "All day": "全天", "by": "截止", "With": "相关人员",
   "Add to my calendar": "加到我的日历", "My calendar": "加到日历", "Invite": "发邀请", "Nothing on this day.": "这天没有安排。",
