@@ -11,6 +11,18 @@
       dates for all-day busy. For every member listed, their synced blocks for the next
       21 days are replaced. Manually added blocks are kept. Writes straight to the repo
       through the GitHub API with the tracker's own token, so nothing else is needed.
+
+  TRACKER_PW=... python3 tools/busy_sync.py shots /tmp/shots
+      Downloads and decrypts the calendar screenshots members uploaded ("I'm busy" →
+      Upload a screenshot) into that folder. Prints JSON: today's date and
+      [{"id", "who", "file"}] for each screenshot waiting to be read.
+
+  TRACKER_PW=... python3 tools/busy_sync.py applyshots result.json
+      result.json = {"<screenshot id>": {"status": "ok", "blocks": [[start, end], ...]}
+                                       | {"status": "unreadable"}}
+      Start/end: "YYYY-MM-DDTHH:MM" (Malaysia time) or plain dates for all-day.
+      Adds the busy times for that member, marks the screenshot read and deletes the
+      encrypted image from the repo. Only times are ever saved.
 """
 import base64, datetime as dt, json, os, sys, time, urllib.request, urllib.error
 from cryptography.hazmat.primitives import hashes
@@ -28,8 +40,8 @@ def key(pw, salt, it):
     return PBKDF2HMAC(hashes.SHA256(), 32, salt, it).derive(pw.encode())
 
 
-def api(method, token, body=None):
-    req = urllib.request.Request(f"https://api.github.com/repos/{REPO}/contents/{PATH}" + ("?ref=main" if method == "GET" else ""),
+def api(method, token, body=None, path=PATH):
+    req = urllib.request.Request(f"https://api.github.com/repos/{REPO}/contents/{path}" + ("?ref=main" if method == "GET" else ""),
                                  method=method, data=json.dumps(body).encode() if body else None,
                                  headers={"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
                                           "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "campaign-tracker-sync"})
@@ -63,6 +75,11 @@ def members(d):
         if email:
             out.append({"name": m["name"], "email": email})
     return out
+
+
+def fetch_raw(path):
+    with urllib.request.urlopen(f"https://raw.githubusercontent.com/{REPO}/main/{path}?t={int(time.time())}", timeout=120) as r:
+        return r.read()
 
 
 def to_local(s):
@@ -124,14 +141,111 @@ def apply(d, busy, now):
     return added
 
 
+def apply_shots(d, res, now):
+    """Add busy blocks read from screenshots. Returns list of (path, sha) to delete."""
+    today = now.date()
+    first, last = today - dt.timedelta(days=1), today + dt.timedelta(days=90)
+    shots = {x["id"]: x for x in d.get("busyShots", [])}
+    busy = d.setdefault("busy", [])
+    have = {(b["who"], b["date"], b["start"], b["end"]) for b in busy}
+    gone = []
+    for sid, info in res.items():
+        sh = shots.get(sid)
+        if not sh or sh.get("status") != "pending":
+            continue
+        n = 0
+        if info.get("status") == "ok":
+            for s, e in info.get("blocks", []):
+                a, b = to_local(s), to_local(e)
+                if len(e) == 10 and len(s) == 10 and b <= a:
+                    b = a + dt.timedelta(days=1)
+                for day, hs, he in split_days(a, b):
+                    k = (sh["who"], day, hs, he)
+                    if not (first.isoformat() <= day <= last.isoformat()) or hs == he or k in have:
+                        continue
+                    have.add(k)
+                    busy.append({"who": sh["who"], "date": day, "start": hs, "end": he, "src": "shot", "shot": sid})
+                    n += 1
+            sh["status"], sh["n"] = "done", n
+        else:
+            sh["status"] = "unreadable"
+        sh["readAt"] = now.isoformat(timespec="minutes")
+        if sh.get("path"):
+            gone.append((sh.pop("path"), sh.pop("sha", None)))
+    # keep only the last 10 notes per person
+    per = {}
+    for x in reversed(d.get("busyShots", [])):
+        per.setdefault(x["who"], []).append(x)
+    d["busyShots"] = [x for x in d.get("busyShots", []) if x["status"] == "pending" or x in per[x["who"]][:10]]
+    busy.sort(key=lambda b: (b["date"], b["start"], b["who"]))
+    return gone
+
+
+def save(pw, mutate, message):
+    for attempt in range(3):
+        enc0 = decrypt(fetch_public(), pw)
+        token = enc0.get("submitToken")
+        if not token:
+            sys.exit("Team updates are off in the tracker, so there is no token to save with.")
+        file = api("GET", token)
+        enc = json.loads(base64.b64decode(file["content"]))
+        d = decrypt(enc, pw)
+        result = mutate(d)
+        out = encrypt(d, enc, pw)
+        try:
+            api("PUT", token, {"message": message, "sha": file["sha"], "branch": "main",
+                               "content": base64.b64encode(json.dumps(out).encode()).decode()})
+            return token, result
+        except urllib.error.HTTPError as e:
+            if e.code in (409, 422) and attempt < 2:
+                time.sleep(2)
+                continue
+            raise
+
+
 def main():
     pw = os.environ["TRACKER_PW"]
     mode = sys.argv[1]
     if mode == "members":
         print(json.dumps(members(decrypt(fetch_public(), pw)), ensure_ascii=False, indent=2))
         return
+    if mode == "shots":
+        folder = sys.argv[2]
+        os.makedirs(folder, exist_ok=True)
+        enc = fetch_public()
+        d = decrypt(enc, pw)
+        k = key(pw, base64.b64decode(enc["salt"]), enc["iter"])
+        out = []
+        for x in d.get("busyShots", []):
+            if x.get("status") != "pending" or not x.get("path"):
+                continue
+            try:
+                blob = fetch_raw(x["path"])
+                img = AESGCM(k).decrypt(blob[:12], blob[12:], None)
+            except Exception as e:
+                out.append({"id": x["id"], "who": x["who"], "file": None, "error": str(e)[:80]})
+                continue
+            ext = {"image/png": ".png", "image/jpeg": ".jpg", "image/heic": ".heic", "image/webp": ".webp"}.get(x.get("mime", ""), ".png")
+            f = os.path.join(folder, x["id"] + ext)
+            open(f, "wb").write(img)
+            out.append({"id": x["id"], "who": x["who"], "file": f, "uploaded": x.get("at")})
+        print(json.dumps({"today": dt.datetime.now(MYT).date().isoformat(), "screenshots": out}, ensure_ascii=False, indent=2))
+        return
+    if mode == "applyshots":
+        res = json.load(open(sys.argv[2], encoding="utf8"))
+        now = dt.datetime.now(MYT)
+        token, gone = save(pw, lambda d: apply_shots(d, res, now), "Read calendar screenshots")
+        for path, sha in gone:
+            try:
+                if not sha:
+                    sha = api("GET", token, path=path)["sha"]
+                api("DELETE", token, {"message": "Delete read screenshot", "sha": sha, "branch": "main"}, path=path)
+            except Exception as e:
+                print("could not delete", path, e, file=sys.stderr)
+        print(json.dumps({"read": list(res.keys()), "deleted": len(gone)}))
+        return
     if mode != "apply":
-        sys.exit("mode must be members or apply")
+        sys.exit("mode must be members, apply, shots or applyshots")
     busy = json.load(open(sys.argv[2], encoding="utf8"))
     for attempt in range(3):
         enc0 = decrypt(fetch_public(), pw)

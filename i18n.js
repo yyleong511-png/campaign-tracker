@@ -1,6 +1,7 @@
 // Interface text in Chinese. Keys are the English text shown on screen.
 // "@..." keys hold longer passages with formatting, in both languages.
 window.__EN = {
+  "@shotupload": "Take a screenshot of your phone calendar in <b>Day</b>, <b>Week</b> or <b>List</b> view so the <b>dates and times</b> show, then upload it (up to 5). Within 3 hours the busy times are added for you. Only the times are kept; the screenshot is deleted after it's read.",
   "@icsimport": "Works without any sync. Upload a calendar file (.ics) and only the start and end times of your busy events in the next 3 months are saved, never titles or details. Uploading again replaces the last import. <b>Google Calendar:</b> on a computer open calendar.google.com → ⚙ Settings → <b>Import &amp; export</b> → <b>Export</b>, unzip and pick your .ics file. <b>Outlook / Apple Calendar on Mac:</b> File → Export.",
   "@sync1": "Open <b>Google Calendar settings</b> in your phone's browser (the app can't change sharing).",
   "@sync2": "Under <b>Settings for my calendars</b>, tap your calendar → <b>Share with specific people</b> → <b>Add people</b>.",
@@ -15,6 +16,14 @@ window.__EN = {
 };
 window.__ZH = {
   // passages
+  "@shotupload": "把手机日历切到 <b>日</b>、<b>周</b> 或 <b>列表</b> 视图截图，要看得到 <b>日期和时间</b>，然后上传（最多 5 张）。3 小时内会自动加上你的忙碌时间。只保存时间，截图读完后就会删除。",
+  "Upload a screenshot": "上传截图", "Choose screenshots": "选择截图", "Uploading {i} of {n}…": "正在上传第 {i} / {n} 张…",
+  "Up to 5 screenshots at a time.": "一次最多 5 张截图。", "Pick screenshots (images under 10 MB).": "请选截图（每张小于 10 MB）。",
+  "Sent. Busy times appear within 3 hours.": "已发送，3 小时内会出现忙碌时间。",
+  "Screenshot sent {when}. Busy times appear within 3 hours.": "截图已在 {when} 发送，3 小时内会出现忙碌时间。",
+  "Screenshot read: {n} busy times found.": "截图已读取：找到 {n} 个忙碌时段。",
+  "Couldn't read a screenshot. Try one that shows dates and times.": "有一张截图读不出来，请换一张看得到日期和时间的。",
+  "From your screenshots: {n}": "来自你的截图：{n} 个时段",
   "@icsimport": "不需要任何同步也能用。上传日历文件（.ics），只会保存接下来 3 个月忙碌活动的开始和结束时间，绝不保存标题或内容。再上传一次会取代上一次导入。<b>Google 日历：</b>用电脑打开 calendar.google.com → ⚙ 设置 → <b>导入和导出</b> → <b>导出</b>，解压后选那个 .ics 文件。<b>Outlook / Mac 日历：</b>文件 → 导出。",
   "Repeat": "重复", "Does not repeat": "不重复", "Every day": "每天", "Every weekday (Mon–Fri)": "每个工作日（周一到周五）", "Every week": "每周",
   "Until": "直到", "Remove all repeats": "删除全部重复", "Import from a calendar file": "从日历文件导入", "Choose .ics file": "选择 .ics 文件",

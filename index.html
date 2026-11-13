@@ -1047,6 +1047,8 @@ function whoFreeHtml(d) {
   const free = freeSlots(all);
   const mine = me ? (d.busy || []).map((b, i) => [b, i]).filter(([b]) => b.src === "manual" && b.who === me.name && b.date === date) : [];
   const imported = me ? (d.busy || []).filter(b => b.src === "import" && b.who === me.name).length : 0;
+  const fromShots = me ? (d.busy || []).filter(b => b.src === "shot" && b.who === me.name).length : 0;
+  const myShots = me ? (d.busyShots || []).filter(x => x.who === me.name).slice(-3) : [];
   const sync = d.busySync || {}, synced = team.filter(m => sync[m.name] && sync[m.name].status === "ok").map(m => m.name);
   return `<h2>${T("Who's free")}</h2>
     <div class="card">${rows}
@@ -1054,6 +1056,8 @@ function whoFreeHtml(d) {
       <div class="legend" style="margin:8px 0 0"><span><i style="background:#DCF3E3"></i>${T("Free")}</span><span><i style="background:#9AA0B4"></i>${T("Busy")}</span><span><i style="background:${KIND_COLOR.Meeting}"></i>${T("Team event")}</span></div>
       <div class="freebox">${free.length ? T("Everyone free: {slots}", {slots: free.map(([a, b]) => fmtTime(minToHm(a)) + "–" + fmtTime(minToHm(b === 1440 ? 1439 : b))).join(" · ")}) : T("No time when everyone is free (8 am – 10 pm).")}</div>
       ${mine.length ? mine.map(([b, i]) => `<div class="busybtn"><span>${T("You're busy")}: ${b.start === "00:00" && b.end === "24:00" ? T("All day") : esc(fmtTime(b.start)) + "–" + esc(fmtTime(b.end === "24:00" ? "23:59" : b.end))}</span><span style="display:flex;gap:6px">${b.rep ? `<button data-busyrep="${esc(b.rep)}" style="min-height:36px;padding:6px 10px;background:var(--badbg);color:var(--bad)">${T("Remove all repeats")}</button>` : ""}<button data-busydel="${i}" style="min-height:36px;padding:6px 12px;background:var(--badbg);color:var(--bad)">${T("Remove")}</button></span></div>`).join("") : ""}
+      ${myShots.map(x => `<div class="busybtn"><span>${x.status === "pending" ? T("Screenshot sent {when}. Busy times appear within 3 hours.", {when: fmtWhen(x.at)}) : x.status === "done" ? T("Screenshot read: {n} busy times found.", {n: x.n || 0}) : T("Couldn't read a screenshot. Try one that shows dates and times.")}</span>${x.status === "pending" ? `<button data-shotdel="${esc(x.id)}" style="min-height:36px;padding:6px 12px;background:var(--badbg);color:var(--bad)">${T("Cancel")}</button>` : `<button data-shotok="${esc(x.id)}" style="min-height:36px;padding:6px 12px">OK</button>`}</div>`).join("")}
+      ${fromShots ? `<div class="busybtn"><span>${T("From your screenshots: {n}", {n: fromShots})}</span><button data-busyshot="1" style="min-height:36px;padding:6px 12px;background:var(--badbg);color:var(--bad)">${T("Remove")}</button></div>` : ""}
       ${imported ? `<div class="busybtn"><span>${T("Imported from your calendar file: {n}", {n: imported})}</span><button data-busyimp="1" style="min-height:36px;padding:6px 12px;background:var(--badbg);color:var(--bad)">${T("Remove")}</button></div>` : ""}
       ${me && can ? `<button class="wide" data-busy="new" style="margin-top:10px">${T("I'm busy")}</button>` : ""}
       <div class="mute small" style="margin-top:8px">${synced.length ? T("Synced from Google Calendar: {names}", {names: synced.join(", ")}) : T("No one's calendar is synced yet. See Profile → Calendar sync.")}</div>
@@ -1075,6 +1079,12 @@ function busyFormHtml() {
       <button class="wide primary" type="submit">${T("Save")}</button>
       <button class="wide" type="button" data-busy="cancel">${T("Cancel")}</button>
     </form>
+    <h2>${T("Upload a screenshot")}</h2>
+    <div class="card">
+      <div class="mute small">${T("@shotupload")}</div>
+      <label class="wide" style="display:block;text-align:center;border-radius:14px;font-weight:600;padding:12px;margin-top:10px;background:var(--accent);color:#fff;cursor:pointer">${T("Choose screenshots")}<input id="bz-shot" type="file" accept="image/*" multiple hidden></label>
+      <div id="bz-shot-st" class="mute small" style="margin-top:6px"></div>
+    </div>
     <h2>${T("Import from a calendar file")}</h2>
     <div class="card">
       <div class="mute small">${T("@icsimport")}</div>
@@ -1501,9 +1511,17 @@ $("main").addEventListener("click", async ev => {
     if (b.dataset.busy === "new") { busyEdit = {date: cal.sel, all: false, start: "09:00", end: "18:00", rep: "none", until: ""}; rerenderSchedule(); window.scrollTo(0, 0); return; }
     if (b.dataset.busy === "cancel") { busyEdit = null; rerenderSchedule(); return; }
   }
-  if (b.dataset.busyrep || b.dataset.busyimp) {
+  if (b.dataset.shotdel || b.dataset.shotok) {
+    const id = b.dataset.shotdel || b.dataset.shotok, sh = (lastData.busyShots || []).find(x => x.id === id); if (!sh) return; b.disabled = true;
+    try {
+      if (b.dataset.shotdel && sh.path) { const tok = await getToken(); if (tok) { if (sh.sha) await ghPath(tok, "DELETE", sh.path, {message: "Remove screenshot", sha: sh.sha, branch: "main"}).catch(() => null); } }
+      const d = await publish(x => { x.busyShots = (x.busyShots || []).filter(y => y.id !== id); }, b.dataset.shotdel ? "Cancel screenshot" : "Clear screenshot note"); showApp(d); show("schedule");
+    } catch (e) { toast("Could not save. Try again."); b.disabled = false; }
+    return;
+  }
+  if (b.dataset.busyrep || b.dataset.busyimp || b.dataset.busyshot) {
     const me = findMe(lastData); if (!me) return; b.disabled = true;
-    const r = b.dataset.busyrep, keep = y => !(y.who === me.name && (r ? y.rep === r : y.src === "import"));
+    const r = b.dataset.busyrep, src = b.dataset.busyshot ? "shot" : "import", keep = y => !(y.who === me.name && (r ? y.rep === r : y.src === src));
     try { const d = await publish(x => { x.busy = (x.busy || []).filter(keep); }, r ? "Remove repeating busy time" : "Remove imported busy times"); showApp(d); show("schedule"); toast("Removed."); }
     catch (e) { toast("Could not save. Try again."); b.disabled = false; }
     return;
@@ -1742,6 +1760,27 @@ $("main").addEventListener("change", ev => {
   if (busyEdit.rep !== "none" && !busyEdit.until && busyEdit.date) busyEdit.until = addDays(busyEdit.date, 27);
   if ($("bz-start")) { busyEdit.start = $("bz-start").value; busyEdit.end = $("bz-end").value; }
   rerenderSchedule();
+});
+$("main").addEventListener("change", async ev => {
+  if (ev.target.id !== "bz-shot") return;
+  const files = [...(ev.target.files || [])], me = findMe(lastData), st = $("bz-shot-st"); if (!files.length || !me) return;
+  if (files.length > 5) { toast("Up to 5 screenshots at a time."); ev.target.value = ""; return; }
+  if (files.some(f => !/^image\//.test(f.type) || f.size > 10 * 1024 * 1024)) { toast("Pick screenshots (images under 10 MB)."); ev.target.value = ""; return; }
+  ev.target.disabled = true;
+  try {
+    const tok = await getToken(); if (!tok) throw new Error("notoken");
+    const metas = [];
+    for (let i = 0; i < files.length; i++) {
+      st.textContent = T("Uploading {i} of {n}…", {i: i + 1, n: files.length});
+      const id = "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), path = "files/shots/" + id + ".bin";
+      const iv = rnd(12), ct = new Uint8Array(await crypto.subtle.encrypt({name: "AES-GCM", iv}, await teamKey(["encrypt"]), await files[i].arrayBuffer()));
+      const all = new Uint8Array(12 + ct.length); all.set(iv, 0); all.set(ct, 12);
+      const res = await ghPath(tok, "PUT", path, {message: "Calendar screenshot", content: bytesToB64(all), branch: "main"});
+      metas.push({id, who: me.name, at: new Date().toISOString(), path, sha: res && res.content && res.content.sha, mime: files[i].type, status: "pending"});
+    }
+    const d = await publish(x => { (x.busyShots = x.busyShots || []).push(...metas); }, "Calendar screenshot for busy times");
+    busyEdit = null; showApp(d); show("schedule"); toast("Sent. Busy times appear within 3 hours.");
+  } catch (e) { toast(e.message === "notoken" ? "Uploads need team updates turned on." : "Upload failed. Check your connection and try again."); ev.target.disabled = false; st.textContent = ""; }
 });
 $("main").addEventListener("change", async ev => {
   if (ev.target.id !== "bz-ics") return;
