@@ -33,7 +33,8 @@ REPO = "yyleong511-png/campaign-tracker"
 PATH = "data.enc.json"
 MYT = dt.timezone(dt.timedelta(hours=8))
 WINDOW_DAYS = 21
-ADMIN_EMAIL = "yyleong511@gmail.com"
+# Calendar ID used for the admin: "primary" is Google Calendar's ID for the signed-in account's own calendar.
+ADMIN_EMAIL = "primary"
 
 
 def key(pw, salt, it):
