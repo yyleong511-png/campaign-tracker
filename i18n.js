@@ -15,6 +15,12 @@ window.__EN = {
   "@ppttip": "<b>Want to present this to clients?</b> Slides can't be shown full screen in the tracker. Export it as a PDF (PowerPoint, Keynote or Google Slides: Export / Download → PDF) and upload the PDF too. Animations and videos inside the slides won't carry over."
 };
 window.__ZH = {
+  "Yes": "是", "No": "否", "{n} days are not saved yet. Save them?": "还有 {n} 天的编辑没保存，要保存吗？",
+  "You have unsaved changes on {n} days from last time. Keep editing them?": "上次有 {n} 天的编辑还没保存，要继续编辑吗？",
+  "Clear your earlier changes? They can't be brought back.": "确认清空之前的编辑记录吗？清空后就找不回来了。",
+  "{n} days changed, not saved yet. You can switch days freely, then save everything at once.": "有 {n} 天改了还没保存。可以随便切换日子，最后一次保存全部。",
+  "Save all ({n} days)": "全部保存（{n} 天）", "{n} days are not saved yet. Close without saving?": "还有 {n} 天没保存，确定不保存就关闭吗？",
+  "No changes to save yet.": "还没有改动要保存。", "Saved {n} days.": "已保存 {n} 天。", "Close": "关闭",
   "Show my calendar screenshot here": "放我的日历截图在这里对照", "Only you can see it. It isn't uploaded or saved.": "只有你自己看得到，不会上传，也不会保存。",
   "My calendar screenshot": "我的日历截图", "Hide": "收起", "Change": "换一张",
   "Tap to edit schedule": "点击更改 schedule", "Edit my schedule": "更改我的时间表", "Previous week": "上一周", "Next week": "下一周",

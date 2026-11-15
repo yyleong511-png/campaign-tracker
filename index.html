@@ -220,6 +220,14 @@ nav{padding-left:calc(16px + env(safe-area-inset-left));padding-right:calc(16px 
 .bz-week button.on{background:var(--accent);color:#dcdcff}.bz-week button.on b{color:#fff}
 .bz-week button i{display:block;width:6px;height:6px;border-radius:50%;margin:3px auto 0;background:transparent}
 .bz-week button i.has{background:#9AA0B4}
+.bz-week button i.dirty{background:#F59E0B}
+.bz-ask{position:fixed;inset:0;z-index:60;background:rgba(11,11,16,.45);display:flex;align-items:center;justify-content:center;padding:16px}
+.bz-ask .box{background:var(--panel);border-radius:18px;padding:20px;max-width:340px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.25)}
+.bz-ask .msg{font-size:16px;line-height:1.5;margin-bottom:16px;color:var(--ink)}
+.bz-ask .btns{display:flex;gap:10px}
+.bz-ask .btns button{flex:1;min-height:46px;border-radius:12px;border:0;font-size:16px;font-weight:700;background:var(--bg);color:var(--ink)}
+.bz-ask .btns button.primary{background:var(--accent);color:#fff}
+.bz-unsaved{background:#FEF3C7;color:#92400E;border-radius:12px;padding:8px 12px;font-size:13px;margin-bottom:10px}
 .bz-week .bz-nav{flex:0 0 28px;background:transparent;font-size:20px;color:var(--mute)}
 .bz-chips{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 4px}
 .bz-chips button{border:1.5px solid var(--line);border-radius:999px;padding:7px 12px;font-size:14px;background:var(--panel);color:var(--ink);min-height:40px}
@@ -1112,6 +1120,69 @@ function bzBlocks(b) {
   for (let m = 0; m <= 1440; m++) { const on = m < 1440 && arr[m]; if (on && st < 0) st = m; if (!on && st >= 0) { out.push([st, m]); st = -1; } }
   return out;
 }
+window.addEventListener("beforeunload", ev => { if (typeof bzDirty === "function" && bzDirty().length) { ev.preventDefault(); ev.returnValue = ""; } });
+let bzDrafts = {}; // date -> edited (unsaved) day; everything is saved together with one Save
+const bzDirty = () => Object.values(bzDrafts).filter(x => x.dirty);
+function bzOpen(date) { return bzDrafts[date] || bzLoad(date); }
+function bzMark() { busyEdit.dirty = true; bzDrafts[busyEdit.date] = busyEdit; bzPersist(); }
+// Unsaved days are also kept on this phone, so nothing is lost if the page closes or crashes.
+const bzKey = () => "ct.bzdrafts." + ((findMe(lastData) || {}).name || "");
+function bzPersist() {
+  const dirty = bzDirty();
+  if (!dirty.length) { sdel(bzKey()); return; }
+  sset(bzKey(), JSON.stringify({cur: busyEdit ? busyEdit.date : dirty[0].date, drafts: dirty}));
+}
+function bzStored() {
+  try { const o = JSON.parse(sget(bzKey()) || "null"); return o && Array.isArray(o.drafts) && o.drafts.length ? o : null; } catch (e) { return null; }
+}
+async function bzSaveAll(btn) {
+  bzRead();
+  const me = findMe(lastData); if (!me) return false;
+  const drafts = bzDirty();
+  if (!drafts.length) { toast("No changes to save yet."); return false; }
+  for (const dr of drafts) {
+    const bad = dr.ex.some(x => !x.s || !x.e) ? "Fill in both times, or remove that row." : dr.ex.some(x => x.e !== "00:00" && x.e !== "23:59" && x.e <= x.s) ? "End time is before the start time."
+      : dr.weekly && (!dr.until || dr.until < dr.date) ? "Pick an end date after the start date." : dr.weekly && dr.until > addDays(dr.date, 180) ? "Repeats can go up to 6 months." : "";
+    if (bad) { busyEdit = dr; rerenderSchedule(); toast(T(bad) + " (" + bzDayLabel(dr.date) + ")"); return false; }
+  }
+  // Weekly days first, then single days, so a day you edited on its own wins over a weekly pattern.
+  const base = Date.now().toString(36), plan = {};
+  [...drafts.filter(d => d.weekly), ...drafts.filter(d => !d.weekly)].forEach((dr, k) => {
+    const blocks = bzBlocks(dr).map(([a, c]) => [minToHm(a), minToHm(c)]), rid = dr.weekly ? "r" + base + k : null;
+    for (let x = dr.date; x <= (dr.weekly ? dr.until : dr.date); x = addDays(x, 7)) plan[x] = {blocks, rid};
+  });
+  const dates = Object.keys(plan), cur = busyEdit.date;
+  if (btn) btn.disabled = true;
+  try {
+    const d = await publish(x => {
+      // Each day's schedule replaces what you typed in before for that day; synced or imported times stay.
+      x.busy = (x.busy || []).filter(y => !(y.who === me.name && y.src === "manual" && plan[y.date]));
+      dates.forEach((dt, k) => plan[dt].blocks.forEach(([start, end], j) => { const o = {who: me.name, date: dt, start, end, src: "manual", id: base + k + "_" + j}; if (plan[dt].rid) o.rep = plan[dt].rid; x.busy.push(o); }));
+    }, drafts.length > 1 ? "Update schedule (" + drafts.length + " days)" : "Update schedule");
+    bzDrafts = {}; sdel(bzKey()); lastData = d; busyEdit = bzLoad(cur);
+    showApp(d); show("schedule"); toast(T("Saved {n} days.", {n: drafts.length})); return true;
+  } catch (e) { toast(e.message === "notoken" ? "Uploads need team updates turned on." : "Could not save. Try again."); if (btn) btn.disabled = false; return false; }
+}
+function bzAsk(msg) {
+  return new Promise(res => {
+    const w = document.createElement("div"); w.className = "bz-ask";
+    w.innerHTML = `<div class="box" role="dialog" aria-modal="true"><div class="msg"></div><div class="btns"><button type="button" class="primary" data-a="1">${T("Yes")}</button><button type="button" data-a="0">${T("No")}</button></div></div>`;
+    w.querySelector(".msg").textContent = msg;
+    w.addEventListener("click", ev => { const b = ev.target.closest("button"); if (!b) return; w.remove(); res(b.dataset.a === "1"); });
+    document.body.appendChild(w); w.querySelector("button").focus();
+  });
+}
+async function bzStart(date) {
+  bzDrafts = {};
+  const st = bzStored();
+  if (st) {
+    let keep = await bzAsk(T("You have unsaved changes on {n} days from last time. Keep editing them?", {n: st.drafts.length}));
+    if (!keep) keep = !(await bzAsk(T("Clear your earlier changes? They can't be brought back.")));
+    if (keep) { st.drafts.forEach(d => { d.dirty = true; bzDrafts[d.date] = d; }); date = st.cur || st.drafts[0].date; }
+    else sdel(bzKey());
+  }
+  busyEdit = bzOpen(date); rerenderSchedule(); window.scrollTo(0, 0);
+}
 function bzLoad(date) {
   const me = findMe(lastData), mine = me ? (lastData.busy || []).filter(y => y.who === me.name && y.src === "manual" && y.date === date) : [];
   if (mine.length === 1 && mine[0].start === "00:00" && mine[0].end === "24:00") return {date, base: "busy", ex: [], weekly: false, until: ""};
@@ -1124,17 +1195,21 @@ function bzDayLabel(date) {
 }
 function bzRead() {
   if (!busyEdit) return;
+  const before = JSON.stringify([busyEdit.ex, busyEdit.weekly, busyEdit.until]);
   document.querySelectorAll("[data-bzs]").forEach(el => { const x = busyEdit.ex[+el.dataset.bzs]; if (x) x.s = el.value; });
   document.querySelectorAll("[data-bze]").forEach(el => { const x = busyEdit.ex[+el.dataset.bze]; if (x) x.e = el.value; });
   if ($("bz-weekly")) busyEdit.weekly = $("bz-weekly").checked;
   if ($("bz-until")) busyEdit.until = $("bz-until").value;
+  if (busyEdit.weekly && !busyEdit.until) busyEdit.until = addDays(busyEdit.date, 27);
+  if (JSON.stringify([busyEdit.ex, busyEdit.weekly, busyEdit.until]) !== before) bzMark();
 }
 function busyFormHtml() {
   const b = busyEdit, me = findMe(lastData);
   const t0 = new Date(b.date + "T12:00:00Z"), mon = addDays(b.date, -((t0.getUTCDay() + 6) % 7));
   const hasBusy = new Set(me ? (lastData.busy || []).filter(y => y.who === me.name).map(y => y.date) : []);
   const wk = LANG === "zh" ? "一二三四五六日".split("") : ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  const days = [0, 1, 2, 3, 4, 5, 6].map(k => { const dte = addDays(mon, k); return `<button type="button" data-bzday="${dte}" class="${dte === b.date ? "on" : ""}">${wk[k]}<b>${+dte.slice(8)}</b><i class="${hasBusy.has(dte) ? "has" : ""}"></i></button>`; }).join("");
+  const days = [0, 1, 2, 3, 4, 5, 6].map(k => { const dte = addDays(mon, k); return `<button type="button" data-bzday="${dte}" class="${dte === b.date ? "on" : ""}">${wk[k]}<b>${+dte.slice(8)}</b><i class="${bzDrafts[dte] && bzDrafts[dte].dirty ? "dirty" : hasBusy.has(dte) ? "has" : ""}"></i></button>`; }).join("");
+  const nDirty = bzDirty().length;
   const blocks = bzBlocks(b), win = [FR_START, FR_END], parts = [];
   let cur = win[0];
   blocks.map(([a, c]) => [Math.max(a, win[0]), Math.min(c, win[1])]).filter(([a, c]) => c > a).forEach(([a, c]) => { if (a > cur) parts.push([cur, a, 0]); parts.push([a, c, 1]); cur = c; });
@@ -1143,6 +1218,7 @@ function busyFormHtml() {
   return `<h2>${T("Edit my schedule")}</h2>
     ${bzRefHtml()}
     <div class="bz-week"><button type="button" class="bz-nav" data-bzweek="-7" aria-label="${T("Previous week")}">‹</button>${days}<button type="button" class="bz-nav" data-bzweek="7" aria-label="${T("Next week")}">›</button></div>
+    ${nDirty ? `<div class="bz-unsaved">${T("{n} days changed, not saved yet. You can switch days freely, then save everything at once.", {n: nDirty})}</div>` : ""}
     <form class="card ed" id="bz-form" autocomplete="off" style="border:0">
       <div class="mute small">${esc(bzDayLabel(b.date))} · ${T("Step 1: what is this day mostly like?")}</div>
       <div class="bz-chips">${BZ_BASE_LABEL.map(([v, l]) => `<button type="button" data-bzbase="${v}" class="${b.base === v ? "on" : ""}">${T(l)}</button>`).join("")}</div>
@@ -1157,8 +1233,8 @@ function busyFormHtml() {
       <label class="chk"><input type="checkbox" id="bz-weekly" ${b.weekly ? "checked" : ""}>${T("Same every {day}", {day: wdName})}</label>
       ${b.weekly ? `<label>${T("Until")}<input id="bz-until" type="date" value="${esc(b.until || addDays(b.date, 27))}" required></label>` : ""}
       <div class="mute small" style="margin-top:8px">${T("Only the time is shared, not the reason.")}</div>
-      <button class="wide primary" type="submit" style="margin-top:10px">${T("Save")}</button>
-      <button class="wide" type="button" data-busy="cancel">${T("Cancel")}</button>
+      <button class="wide primary" type="submit" style="margin-top:10px">${nDirty ? T("Save all ({n} days)", {n: nDirty}) : T("Save")}</button>
+      <button class="wide" type="button" data-busy="cancel">${T("Close")}</button>
     </form>
     <h2>${T("Import from a calendar file")}</h2>
     <div class="card">
@@ -1583,8 +1659,15 @@ $("main").addEventListener("click", async ev => {
     render(lastData); show("overview"); return;
   }
   if (b.dataset.busy) {
-    if (b.dataset.busy === "new") { busyEdit = bzLoad(cal.sel || todayKL()); rerenderSchedule(); window.scrollTo(0, 0); return; }
-    if (b.dataset.busy === "cancel") { busyEdit = null; rerenderSchedule(); return; }
+    if (b.dataset.busy === "new") { await bzStart(cal.sel || todayKL()); return; }
+    if (b.dataset.busy === "cancel") {
+      bzRead(); const n = bzDirty().length;
+      if (n) {
+        if (await bzAsk(T("{n} days are not saved yet. Save them?", {n}))) { if (!(await bzSaveAll(b))) return; }
+        else { bzDrafts = {}; sdel(bzKey()); }
+      }
+      bzDrafts = {}; busyEdit = null; rerenderSchedule(); return;
+    }
   }
   if (busyEdit && b.dataset.bzref) {
     bzRead();
@@ -1594,12 +1677,15 @@ $("main").addEventListener("click", async ev => {
   }
   if (busyEdit && (b.dataset.bzday || b.dataset.bzweek || b.dataset.bzbase || b.dataset.bzexadd || b.dataset.bzexrm !== undefined || b.dataset.bzexb !== undefined)) {
     bzRead();
-    if (b.dataset.bzday) busyEdit = bzLoad(b.dataset.bzday);
-    else if (b.dataset.bzweek) busyEdit = bzLoad(addDays(busyEdit.date, +b.dataset.bzweek));
-    else if (b.dataset.bzbase) busyEdit.base = b.dataset.bzbase;
-    else if (b.dataset.bzexadd) busyEdit.ex.push({s: "18:00", e: "19:00", busy: busyEdit.base === "free"});
-    else if (b.dataset.bzexrm !== undefined) busyEdit.ex.splice(+b.dataset.bzexrm, 1);
-    else { const x = busyEdit.ex[+b.dataset.bzexb]; if (x) x.busy = b.dataset.v === "1"; }
+    if (b.dataset.bzday) busyEdit = bzOpen(b.dataset.bzday);
+    else if (b.dataset.bzweek) busyEdit = bzOpen(addDays(busyEdit.date, +b.dataset.bzweek));
+    else {
+      if (b.dataset.bzbase) busyEdit.base = b.dataset.bzbase;
+      else if (b.dataset.bzexadd) busyEdit.ex.push({s: "18:00", e: "19:00", busy: busyEdit.base === "free"});
+      else if (b.dataset.bzexrm !== undefined) busyEdit.ex.splice(+b.dataset.bzexrm, 1);
+      else { const x = busyEdit.ex[+b.dataset.bzexb]; if (x) x.busy = b.dataset.v === "1"; }
+      bzMark();
+    }
     rerenderSchedule(); return;
   }
   if (b.dataset.shotdel || b.dataset.shotok) {
@@ -1847,7 +1933,6 @@ $("main").addEventListener("submit", async ev => {
 $("main").addEventListener("change", ev => {
   if (!busyEdit || !(ev.target.id === "bz-weekly" || ev.target.dataset.bzs !== undefined || ev.target.dataset.bze !== undefined)) return;
   bzRead();
-  if (busyEdit.weekly && !busyEdit.until) busyEdit.until = addDays(busyEdit.date, 27);
   rerenderSchedule();
 });
 $("main").addEventListener("change", ev => {
@@ -1896,27 +1981,7 @@ $("main").addEventListener("submit", async ev => {
   if (ev.target.id !== "bz-form") return;
   ev.preventDefault(); ev.stopImmediatePropagation();
   const me = findMe(lastData); if (!me) return;
-  bzRead();
-  const date = busyEdit.date, weekly = busyEdit.weekly, until = busyEdit.until || "";
-  for (const x of busyEdit.ex) {
-    if (!x.s || !x.e) { toast("Fill in both times, or remove that row."); return; }
-    if (x.e !== "00:00" && x.e <= x.s) { toast("End time is before the start time."); return; }
-  }
-  if (weekly && (!until || until < date)) { toast("Pick an end date after the start date."); return; }
-  if (weekly && until > addDays(date, 180)) { toast("Repeats can go up to 6 months."); return; }
-  const dates = [];
-  for (let x = date; x <= (weekly ? until : date); x = addDays(x, 7)) dates.push(x);
-  const blocks = bzBlocks(busyEdit).map(([a, c]) => [minToHm(a), minToHm(c)]);
-  const btn = ev.target.querySelector("button[type=submit]"); btn.disabled = true;
-  try {
-    const base = Date.now().toString(36), rid = weekly ? "r" + base : null;
-    const d = await publish(x => {
-      // This day's schedule replaces what you typed in before for the same day(s); synced or imported times stay.
-      x.busy = (x.busy || []).filter(y => !(y.who === me.name && y.src === "manual" && dates.includes(y.date)));
-      dates.forEach((dt, k) => blocks.forEach(([start, end], j) => { const o = {who: me.name, date: dt, start, end, src: "manual", id: base + k + "_" + j}; if (rid) o.rep = rid; x.busy.push(o); }));
-    }, dates.length > 1 ? "Update weekly schedule" : "Update schedule");
-    busyEdit = null; cal.sel = date; cal.y = +date.slice(0, 4); cal.m = +date.slice(5, 7) - 1; showApp(d); show("schedule"); toast("Saved.");
-  } catch (e) { toast(e.message === "notoken" ? "Uploads need team updates turned on." : "Could not save. Try again."); btn.disabled = false; }
+  await bzSaveAll(ev.target.querySelector("button[type=submit]"));
 }, true);
 $("main").addEventListener("change", async ev => {
   if (ev.target.dataset.mdone === undefined) return;
