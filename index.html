@@ -236,6 +236,15 @@ nav{padding-left:calc(16px + env(safe-area-inset-left));padding-right:calc(16px 
 .bz-bar{display:flex;height:30px;border-radius:9px;overflow:hidden;margin:10px 0 4px;background:#DCF3E3}
 .bz-bar div{display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;overflow:hidden;white-space:nowrap}
 .bz-ticks{display:flex;justify-content:space-between;font-size:11px;color:var(--mute)}
+/* Your own calendar screenshot, shown above the editor for reference. Stays on this phone only. */
+.bz-refadd{display:block;text-align:center;border:1.5px dashed #B9BCCB;border-radius:14px;padding:12px;margin-bottom:12px;color:var(--accent);font-weight:600;cursor:pointer;background:var(--panel)}
+.bz-refadd small{display:block;color:var(--mute);font-weight:400;margin-top:2px}
+.bz-ref{position:sticky;top:0;z-index:5;background:var(--bg);padding:6px 0 8px;margin-bottom:6px}
+.bz-ref .imgs{max-height:42vh;overflow:auto;border-radius:12px;background:#0B0B10;-webkit-overflow-scrolling:touch}
+.bz-ref.min .imgs{max-height:0;overflow:hidden}
+.bz-ref img{display:block;width:100%;height:auto}
+.bz-ref .tools{display:flex;gap:6px;margin-top:6px;align-items:center}
+.bz-ref .tools button,.bz-ref .tools label{flex:1;text-align:center;font-size:13px;font-weight:600;padding:7px 4px;border-radius:10px;background:var(--panel);color:var(--ink);border:0;min-height:34px;cursor:pointer}
 .langbtn{width:44px;height:44px;padding:0;border-radius:50%;font-size:13px;font-weight:700;color:var(--tintink);background:var(--panel);flex:none}
 #langlock{position:fixed;top:calc(12px + env(safe-area-inset-top));right:calc(12px + env(safe-area-inset-right));z-index:6;box-shadow:0 2px 10px rgba(23,26,43,.1)}
 html[lang="zh-Hans"] body{font-family:var(--font),"PingFang SC","Hiragino Sans GB","Noto Sans CJK SC","Microsoft YaHei",sans-serif}
@@ -1089,6 +1098,12 @@ function whoFreeHtml(d) {
 // ---- Edit my schedule: a day = a starting pattern + exceptions; saved as plain busy blocks ----
 const BZ_BASE = {free: [], busy: [[0, 1440]], work: [[540, 1020]], evening: [[0, 1080]]};
 const BZ_BASE_LABEL = [["free", "Free all day"], ["busy", "Busy all day"], ["work", "Busy 9 am – 5 pm"], ["evening", "Free only in the evening"]];
+let bzRef = [], bzRefOpen = true; // object URLs of screenshots picked for reference; never uploaded or saved
+function bzRefHtml() {
+  if (!bzRef.length) return `<label class="bz-refadd">＋ ${T("Show my calendar screenshot here")}<small>${T("Only you can see it. It isn't uploaded or saved.")}</small><input id="bz-ref" type="file" accept="image/*" multiple hidden></label>`;
+  return `<div class="bz-ref ${bzRefOpen ? "" : "min"}"><div class="imgs">${bzRef.map(u => `<img src="${u}" alt="${T("My calendar screenshot")}">`).join("")}</div>
+    <div class="tools"><button type="button" data-bzref="toggle">${T(bzRefOpen ? "Hide" : "Show")}</button><label>${T("Change")}<input id="bz-ref" type="file" accept="image/*" multiple hidden></label><button type="button" data-bzref="clear">${T("Remove")}</button></div></div>`;
+}
 function bzBlocks(b) {
   const arr = new Uint8Array(1440);
   (BZ_BASE[b.base] || []).forEach(([a, c]) => arr.fill(1, a, c));
@@ -1126,6 +1141,7 @@ function busyFormHtml() {
   if (cur < win[1]) parts.push([cur, win[1], 0]);
   const wdName = LANG === "zh" ? "星期" + "日一二三四五六"[t0.getUTCDay()] : t0.toLocaleDateString("en-GB", {weekday: "long", timeZone: "UTC"});
   return `<h2>${T("Edit my schedule")}</h2>
+    ${bzRefHtml()}
     <div class="bz-week"><button type="button" class="bz-nav" data-bzweek="-7" aria-label="${T("Previous week")}">‹</button>${days}<button type="button" class="bz-nav" data-bzweek="7" aria-label="${T("Next week")}">›</button></div>
     <form class="card ed" id="bz-form" autocomplete="off" style="border:0">
       <div class="mute small">${esc(bzDayLabel(b.date))} · ${T("Step 1: what is this day mostly like?")}</div>
@@ -1570,6 +1586,12 @@ $("main").addEventListener("click", async ev => {
     if (b.dataset.busy === "new") { busyEdit = bzLoad(cal.sel || todayKL()); rerenderSchedule(); window.scrollTo(0, 0); return; }
     if (b.dataset.busy === "cancel") { busyEdit = null; rerenderSchedule(); return; }
   }
+  if (busyEdit && b.dataset.bzref) {
+    bzRead();
+    if (b.dataset.bzref === "toggle") bzRefOpen = !bzRefOpen;
+    else { bzRef.forEach(u => URL.revokeObjectURL(u)); bzRef = []; bzRefOpen = true; }
+    rerenderSchedule(); return;
+  }
   if (busyEdit && (b.dataset.bzday || b.dataset.bzweek || b.dataset.bzbase || b.dataset.bzexadd || b.dataset.bzexrm !== undefined || b.dataset.bzexb !== undefined)) {
     bzRead();
     if (b.dataset.bzday) busyEdit = bzLoad(b.dataset.bzday);
@@ -1827,6 +1849,12 @@ $("main").addEventListener("change", ev => {
   bzRead();
   if (busyEdit.weekly && !busyEdit.until) busyEdit.until = addDays(busyEdit.date, 27);
   rerenderSchedule();
+});
+$("main").addEventListener("change", ev => {
+  if (ev.target.id !== "bz-ref" || !busyEdit) return;
+  const files = [...(ev.target.files || [])].filter(f => /^image\//.test(f.type)).slice(0, 5); if (!files.length) return;
+  bzRead(); bzRef.forEach(u => URL.revokeObjectURL(u));
+  bzRef = files.map(f => URL.createObjectURL(f)); bzRefOpen = true; rerenderSchedule();
 });
 $("main").addEventListener("change", async ev => {
   if (ev.target.id !== "bz-shot") return;

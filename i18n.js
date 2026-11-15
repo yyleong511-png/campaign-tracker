@@ -15,6 +15,8 @@ window.__EN = {
   "@ppttip": "<b>Want to present this to clients?</b> Slides can't be shown full screen in the tracker. Export it as a PDF (PowerPoint, Keynote or Google Slides: Export / Download → PDF) and upload the PDF too. Animations and videos inside the slides won't carry over."
 };
 window.__ZH = {
+  "Show my calendar screenshot here": "放我的日历截图在这里对照", "Only you can see it. It isn't uploaded or saved.": "只有你自己看得到，不会上传，也不会保存。",
+  "My calendar screenshot": "我的日历截图", "Hide": "收起", "Change": "换一张",
   "Tap to edit schedule": "点击更改 schedule", "Edit my schedule": "更改我的时间表", "Previous week": "上一周", "Next week": "下一周",
   "Step 1: what is this day mostly like?": "第 1 步：这天大致是？", "Step 2: any times that are different?": "第 2 步：哪些时间例外？",
   "Free all day": "全天有空", "Busy all day": "全天没空", "Busy 9 am – 5 pm": "上班时间没空 (9–5)", "Free only in the evening": "只有晚上有空 (6 点后)",
