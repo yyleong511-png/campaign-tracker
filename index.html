@@ -232,6 +232,12 @@ nav{padding-left:calc(16px + env(safe-area-inset-left));padding-right:calc(16px 
 .bz-chips{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 4px}
 .bz-chips button{border:1.5px solid var(--line);border-radius:999px;padding:7px 12px;font-size:14px;background:var(--panel);color:var(--ink);min-height:40px}
 .bz-chips button.on{border-color:var(--accent);background:var(--tint);color:var(--accent);font-weight:700}
+.bz-chips button.mine{border-color:#F5D58A;background:#FFFBEB}
+.bz-chips button.mine.on{border-color:var(--accent);background:var(--tint)}
+.bz-chips button.del{border-color:#F3B4B4;background:#FEF2F2;color:#B42318}
+.bz-chips button.addp{border-style:dashed;color:var(--accent);background:transparent}
+.bz-pman{background:transparent;border:0;color:var(--mute);font-size:13px;text-decoration:underline;padding:4px 2px;min-height:32px}
+.bz-ask input{width:100%;font:inherit;font-size:16px;background:var(--bg);border:0;border-radius:12px;padding:12px;margin:0 0 14px;color:var(--ink)}
 .bz-ex{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:12px;padding:8px;margin-top:8px;flex-wrap:wrap}
 .bz-ex input[type=time]{width:128px;min-width:0;font:inherit;font-size:16px;font-weight:600;background:var(--bg);border:0;border-radius:8px;padding:6px;color:var(--ink);margin:0}
 .bz-seg{display:flex;background:var(--bg);border-radius:10px;padding:3px}
@@ -1163,6 +1169,41 @@ async function bzSaveAll(btn) {
     showApp(d); show("schedule"); toast(T("Saved {n} days.", {n: drafts.length})); return true;
   } catch (e) { toast(e.message === "notoken" ? "Uploads need team updates turned on." : "Could not save. Try again."); if (btn) btn.disabled = false; return false; }
 }
+// Each member's own one-tap day patterns, kept in the tracker so they follow you to any phone. Times only.
+let bzPresetEdit = false;
+const bzMyPresets = () => { const me = findMe(lastData); return me ? ((lastData.bzPresets || {})[me.name] || []) : []; };
+const bzSame = (p, q) => JSON.stringify(p) === JSON.stringify(q);
+function bzPrompt(msg, value) {
+  return new Promise(res => {
+    const w = document.createElement("div"); w.className = "bz-ask";
+    w.innerHTML = `<form class="box" role="dialog" aria-modal="true"><div class="msg"></div><input maxlength="20" required><div class="btns"><button type="submit" class="primary">${T("Save")}</button><button type="button" data-a="0">${T("Cancel")}</button></div></form>`;
+    w.querySelector(".msg").textContent = msg; const inp = w.querySelector("input"); inp.value = value || "";
+    w.querySelector("[data-a]").addEventListener("click", () => { w.remove(); res(null); });
+    w.querySelector("form").addEventListener("submit", ev => { ev.preventDefault(); const v = inp.value.trim(); if (!v) return; w.remove(); res(v); });
+    document.body.appendChild(w); inp.focus();
+  });
+}
+async function bzPresetAdd() {
+  bzRead();
+  const me = findMe(lastData); if (!me) return;
+  if (bzMyPresets().length >= 8) { toast(T("You can keep up to 8 of your own options. Remove one first.")); return; }
+  const blocks = bzBlocks(busyEdit);
+  const label = await bzPrompt(T("Name this option (e.g. Class day, Night shift):"), "");
+  if (!label) return;
+  const id = "p" + Date.now().toString(36);
+  try {
+    const d = await publish(x => { const all = x.bzPresets = x.bzPresets || {}; (all[me.name] = all[me.name] || []).push({id, label, blocks}); }, "Save my schedule option");
+    lastData = d; rerenderSchedule(); toast(T("Saved as “{name}”.", {name: label}));
+  } catch (e) { toast(e.message === "notoken" ? "Uploads need team updates turned on." : "Could not save. Try again."); }
+}
+async function bzPresetDel(id) {
+  const me = findMe(lastData), pr = bzMyPresets().find(x => x.id === id); if (!me || !pr) return;
+  if (!(await bzAsk(T("Delete your option “{name}”?", {name: pr.label})))) return;
+  try {
+    const d = await publish(x => { const all = x.bzPresets || {}; all[me.name] = (all[me.name] || []).filter(y => y.id !== id); if (!all[me.name].length) delete all[me.name]; }, "Delete my schedule option");
+    lastData = d; if (!bzMyPresets().length) bzPresetEdit = false; rerenderSchedule(); toast("Removed.");
+  } catch (e) { toast("Could not save. Try again."); }
+}
 function bzAsk(msg) {
   return new Promise(res => {
     const w = document.createElement("div"); w.className = "bz-ask";
@@ -1221,7 +1262,11 @@ function busyFormHtml() {
     ${nDirty ? `<div class="bz-unsaved">${T("{n} days changed, not saved yet. You can switch days freely, then save everything at once.", {n: nDirty})}</div>` : ""}
     <form class="card ed" id="bz-form" autocomplete="off" style="border:0">
       <div class="mute small">${esc(bzDayLabel(b.date))} · ${T("Step 1: what is this day mostly like?")}</div>
-      <div class="bz-chips">${BZ_BASE_LABEL.map(([v, l]) => `<button type="button" data-bzbase="${v}" class="${b.base === v ? "on" : ""}">${T(l)}</button>`).join("")}</div>
+      <div class="bz-chips">${BZ_BASE_LABEL.map(([v, l]) => `<button type="button" data-bzbase="${v}" class="${bzSame(blocks, bzBlocks({base: v, ex: []})) ? "on" : ""}">${T(l)}</button>`).join("")}
+        ${bzMyPresets().map(pr => bzPresetEdit ? `<button type="button" class="mine del" data-bzpdel="${esc(pr.id)}">${esc(pr.label)} <span aria-hidden="true">×</span></button>`
+          : `<button type="button" class="mine ${bzSame(blocks, pr.blocks) ? "on" : ""}" data-bzpre="${esc(pr.id)}">★ ${esc(pr.label)}</button>`).join("")}
+        ${bzPresetEdit ? "" : `<button type="button" class="addp" data-bzpadd="1">＋ ${T("Save as my option")}</button>`}</div>
+      ${bzMyPresets().length ? `<button type="button" class="bz-pman" data-bzpman="1">${T(bzPresetEdit ? "Done" : "Edit my options")}</button>` : ""}
       <div class="mute small" style="margin-top:12px">${T("Step 2: any times that are different?")}</div>
       ${b.ex.map((x, i) => `<div class="bz-ex"><input type="time" data-bzs="${i}" value="${esc(x.s)}" aria-label="${T("From")}"><span>${T("to")}</span><input type="time" data-bze="${i}" value="${esc(x.e)}" aria-label="${T("To")}">
         <div class="bz-right"><div class="bz-seg"><button type="button" data-bzexb="${i}" data-v="1" class="${x.busy ? "on" : ""}">${T("Not free")}</button><button type="button" data-bzexb="${i}" data-v="0" class="${x.busy ? "" : "on fr"}">${T("Free")}</button></div>
@@ -1669,18 +1714,26 @@ $("main").addEventListener("click", async ev => {
       bzDrafts = {}; busyEdit = null; rerenderSchedule(); return;
     }
   }
+  if (busyEdit && (b.dataset.bzpadd || b.dataset.bzpdel || b.dataset.bzpman)) {
+    bzRead();
+    if (b.dataset.bzpadd) await bzPresetAdd();
+    else if (b.dataset.bzpdel) await bzPresetDel(b.dataset.bzpdel);
+    else { bzPresetEdit = !bzPresetEdit; rerenderSchedule(); }
+    return;
+  }
   if (busyEdit && b.dataset.bzref) {
     bzRead();
     if (b.dataset.bzref === "toggle") bzRefOpen = !bzRefOpen;
     else { bzRef.forEach(u => URL.revokeObjectURL(u)); bzRef = []; bzRefOpen = true; }
     rerenderSchedule(); return;
   }
-  if (busyEdit && (b.dataset.bzday || b.dataset.bzweek || b.dataset.bzbase || b.dataset.bzexadd || b.dataset.bzexrm !== undefined || b.dataset.bzexb !== undefined)) {
+  if (busyEdit && (b.dataset.bzday || b.dataset.bzweek || b.dataset.bzbase || b.dataset.bzpre || b.dataset.bzexadd || b.dataset.bzexrm !== undefined || b.dataset.bzexb !== undefined)) {
     bzRead();
     if (b.dataset.bzday) busyEdit = bzOpen(b.dataset.bzday);
     else if (b.dataset.bzweek) busyEdit = bzOpen(addDays(busyEdit.date, +b.dataset.bzweek));
     else {
-      if (b.dataset.bzbase) busyEdit.base = b.dataset.bzbase;
+      if (b.dataset.bzbase) { busyEdit.base = b.dataset.bzbase; if (busyEdit.fromPreset) { busyEdit.ex = []; busyEdit.fromPreset = false; } }
+      else if (b.dataset.bzpre) { const pr = bzMyPresets().find(x => x.id === b.dataset.bzpre); if (pr) { busyEdit.base = "free"; busyEdit.ex = pr.blocks.map(([a, c]) => ({s: minToHm(a), e: c >= 1440 ? "23:59" : minToHm(c), busy: true})); busyEdit.fromPreset = true; } }
       else if (b.dataset.bzexadd) busyEdit.ex.push({s: "18:00", e: "19:00", busy: busyEdit.base === "free"});
       else if (b.dataset.bzexrm !== undefined) busyEdit.ex.splice(+b.dataset.bzexrm, 1);
       else { const x = busyEdit.ex[+b.dataset.bzexb]; if (x) x.busy = b.dataset.v === "1"; }

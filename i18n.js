@@ -15,6 +15,10 @@ window.__EN = {
   "@ppttip": "<b>Want to present this to clients?</b> Slides can't be shown full screen in the tracker. Export it as a PDF (PowerPoint, Keynote or Google Slides: Export / Download → PDF) and upload the PDF too. Animations and videos inside the slides won't carry over."
 };
 window.__ZH = {
+  "Save as my option": "存成我的选项", "Edit my options": "管理我的选项", "Done": "完成",
+  "Name this option (e.g. Class day, Night shift):": "给这个选项取个名字（例如：上课日、夜班）：",
+  "Saved as “{name}”.": "已存成“{name}”。", "Delete your option “{name}”?": "要删除你的选项“{name}”吗？",
+  "You can keep up to 8 of your own options. Remove one first.": "最多只能存 8 个自己的选项，请先删掉一个。",
   "Yes": "是", "No": "否", "{n} days are not saved yet. Save them?": "还有 {n} 天的编辑没保存，要保存吗？",
   "You have unsaved changes on {n} days from last time. Keep editing them?": "上次有 {n} 天的编辑还没保存，要继续编辑吗？",
   "Clear your earlier changes? They can't be brought back.": "确认清空之前的编辑记录吗？清空后就找不回来了。",
