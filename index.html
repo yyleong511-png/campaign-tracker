@@ -213,6 +213,29 @@ nav{padding-left:calc(16px + env(safe-area-inset-left));padding-right:calc(16px 
 .fr-ticks{display:flex;justify-content:space-between;margin-left:74px;font-size:10px;color:var(--mute)}
 .freebox{margin-top:10px;border-radius:14px;background:#DCF3E3;color:#14532D;padding:10px 12px;font-size:13px;font-weight:600}
 .busybtn{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px solid var(--line);font-size:13px}
+/* Edit my schedule: pick a day, choose what the day is mostly like, then add exceptions */
+.bz-week{display:flex;gap:5px;align-items:stretch;margin-bottom:12px}
+.bz-week button{flex:1;min-width:0;padding:6px 0;border-radius:12px;background:var(--panel);color:var(--mute);font-size:12px;font-weight:500;border:0;line-height:1.3}
+.bz-week button b{display:block;font-size:17px;color:var(--ink)}
+.bz-week button.on{background:var(--accent);color:#dcdcff}.bz-week button.on b{color:#fff}
+.bz-week button i{display:block;width:6px;height:6px;border-radius:50%;margin:3px auto 0;background:transparent}
+.bz-week button i.has{background:#9AA0B4}
+.bz-week .bz-nav{flex:0 0 28px;background:transparent;font-size:20px;color:var(--mute)}
+.bz-chips{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 4px}
+.bz-chips button{border:1.5px solid var(--line);border-radius:999px;padding:7px 12px;font-size:14px;background:var(--panel);color:var(--ink);min-height:40px}
+.bz-chips button.on{border-color:var(--accent);background:var(--tint);color:var(--accent);font-weight:700}
+.bz-ex{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:12px;padding:8px;margin-top:8px;flex-wrap:wrap}
+.bz-ex input[type=time]{width:128px;min-width:0;font:inherit;font-size:16px;font-weight:600;background:var(--bg);border:0;border-radius:8px;padding:6px;color:var(--ink);margin:0}
+.bz-seg{display:flex;background:var(--bg);border-radius:10px;padding:3px}
+.bz-right{display:flex;align-items:center;gap:4px;margin-left:auto}
+.bz-seg button{padding:5px 10px;border-radius:8px;font-size:13px;color:var(--mute);background:transparent;border:0;min-height:32px}
+.bz-seg button.on{background:#fff;font-weight:700;box-shadow:0 1px 2px #0002;color:#4a4f63}
+.bz-seg button.on.fr{color:#1E7A3C}
+.bz-x{background:transparent;border:0;color:#aaa;font-size:20px;padding:0 4px;min-height:32px}
+.bz-add{background:transparent;border:0;color:var(--accent);font-weight:700;padding:10px 2px;font-size:15px}
+.bz-bar{display:flex;height:30px;border-radius:9px;overflow:hidden;margin:10px 0 4px;background:#DCF3E3}
+.bz-bar div{display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;overflow:hidden;white-space:nowrap}
+.bz-ticks{display:flex;justify-content:space-between;font-size:11px;color:var(--mute)}
 .langbtn{width:44px;height:44px;padding:0;border-radius:50%;font-size:13px;font-weight:700;color:var(--tintink);background:var(--panel);flex:none}
 #langlock{position:fixed;top:calc(12px + env(safe-area-inset-top));right:calc(12px + env(safe-area-inset-right));z-index:6;box-shadow:0 2px 10px rgba(23,26,43,.1)}
 html[lang="zh-Hans"] body{font-family:var(--font),"PingFang SC","Hiragino Sans GB","Noto Sans CJK SC","Microsoft YaHei",sans-serif}
@@ -1059,32 +1082,68 @@ function whoFreeHtml(d) {
       ${myShots.map(x => `<div class="busybtn"><span>${x.status === "pending" ? T("Screenshot sent {when}. Busy times appear within 3 hours.", {when: fmtWhen(x.at)}) : x.status === "done" ? T("Screenshot read: {n} busy times found.", {n: x.n || 0}) : T("Couldn't read a screenshot. Try one that shows dates and times.")}</span>${x.status === "pending" ? `<button data-shotdel="${esc(x.id)}" style="min-height:36px;padding:6px 12px;background:var(--badbg);color:var(--bad)">${T("Cancel")}</button>` : `<button data-shotok="${esc(x.id)}" style="min-height:36px;padding:6px 12px">OK</button>`}</div>`).join("")}
       ${fromShots ? `<div class="busybtn"><span>${T("From your screenshots: {n}", {n: fromShots})}</span><button data-busyshot="1" style="min-height:36px;padding:6px 12px;background:var(--badbg);color:var(--bad)">${T("Remove")}</button></div>` : ""}
       ${imported ? `<div class="busybtn"><span>${T("Imported from your calendar file: {n}", {n: imported})}</span><button data-busyimp="1" style="min-height:36px;padding:6px 12px;background:var(--badbg);color:var(--bad)">${T("Remove")}</button></div>` : ""}
-      ${me && can ? `<button class="wide" data-busy="new" style="margin-top:10px">${T("I'm busy")}</button>` : ""}
+      ${me && can ? `<button class="wide" data-busy="new" style="margin-top:10px">${T("Tap to edit schedule")}</button>` : ""}
       <div class="mute small" style="margin-top:8px">${synced.length ? T("Synced from Google Calendar: {names}", {names: synced.join(", ")}) : T("No one's calendar is synced yet. See Profile → Calendar sync.")}</div>
     </div>`;
 }
+// ---- Edit my schedule: a day = a starting pattern + exceptions; saved as plain busy blocks ----
+const BZ_BASE = {free: [], busy: [[0, 1440]], work: [[540, 1020]], evening: [[0, 1080]]};
+const BZ_BASE_LABEL = [["free", "Free all day"], ["busy", "Busy all day"], ["work", "Busy 9 am – 5 pm"], ["evening", "Free only in the evening"]];
+function bzBlocks(b) {
+  const arr = new Uint8Array(1440);
+  (BZ_BASE[b.base] || []).forEach(([a, c]) => arr.fill(1, a, c));
+  b.ex.forEach(x => { const a = toMin(x.s), c = ["24:00", "00:00", "23:59"].includes(x.e) ? 1440 : toMin(x.e); if (x.s && x.e && c > a) arr.fill(x.busy ? 1 : 0, a, c); });
+  const out = []; let st = -1;
+  for (let m = 0; m <= 1440; m++) { const on = m < 1440 && arr[m]; if (on && st < 0) st = m; if (!on && st >= 0) { out.push([st, m]); st = -1; } }
+  return out;
+}
+function bzLoad(date) {
+  const me = findMe(lastData), mine = me ? (lastData.busy || []).filter(y => y.who === me.name && y.src === "manual" && y.date === date) : [];
+  if (mine.length === 1 && mine[0].start === "00:00" && mine[0].end === "24:00") return {date, base: "busy", ex: [], weekly: false, until: ""};
+  return {date, base: "free", ex: mine.map(y => ({s: y.start, e: y.end === "24:00" ? "23:59" : y.end, busy: true})), weekly: false, until: ""};
+}
+function bzDayLabel(date) {
+  const t = new Date(date + "T12:00:00Z"), wd = t.getUTCDay();
+  return LANG === "zh" ? `${t.getUTCMonth() + 1}月${t.getUTCDate()}日（星期${"日一二三四五六"[wd]}）`
+    : t.toLocaleDateString("en-GB", {weekday: "long", day: "numeric", month: "short", timeZone: "UTC"});
+}
+function bzRead() {
+  if (!busyEdit) return;
+  document.querySelectorAll("[data-bzs]").forEach(el => { const x = busyEdit.ex[+el.dataset.bzs]; if (x) x.s = el.value; });
+  document.querySelectorAll("[data-bze]").forEach(el => { const x = busyEdit.ex[+el.dataset.bze]; if (x) x.e = el.value; });
+  if ($("bz-weekly")) busyEdit.weekly = $("bz-weekly").checked;
+  if ($("bz-until")) busyEdit.until = $("bz-until").value;
+}
 function busyFormHtml() {
-  const b = busyEdit;
-  return `<h2>${T("I'm busy")}</h2>
+  const b = busyEdit, me = findMe(lastData);
+  const t0 = new Date(b.date + "T12:00:00Z"), mon = addDays(b.date, -((t0.getUTCDay() + 6) % 7));
+  const hasBusy = new Set(me ? (lastData.busy || []).filter(y => y.who === me.name).map(y => y.date) : []);
+  const wk = LANG === "zh" ? "一二三四五六日".split("") : ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const days = [0, 1, 2, 3, 4, 5, 6].map(k => { const dte = addDays(mon, k); return `<button type="button" data-bzday="${dte}" class="${dte === b.date ? "on" : ""}">${wk[k]}<b>${+dte.slice(8)}</b><i class="${hasBusy.has(dte) ? "has" : ""}"></i></button>`; }).join("");
+  const blocks = bzBlocks(b), win = [FR_START, FR_END], parts = [];
+  let cur = win[0];
+  blocks.map(([a, c]) => [Math.max(a, win[0]), Math.min(c, win[1])]).filter(([a, c]) => c > a).forEach(([a, c]) => { if (a > cur) parts.push([cur, a, 0]); parts.push([a, c, 1]); cur = c; });
+  if (cur < win[1]) parts.push([cur, win[1], 0]);
+  const wdName = LANG === "zh" ? "星期" + "日一二三四五六"[t0.getUTCDay()] : t0.toLocaleDateString("en-GB", {weekday: "long", timeZone: "UTC"});
+  return `<h2>${T("Edit my schedule")}</h2>
+    <div class="bz-week"><button type="button" class="bz-nav" data-bzweek="-7" aria-label="${T("Previous week")}">‹</button>${days}<button type="button" class="bz-nav" data-bzweek="7" aria-label="${T("Next week")}">›</button></div>
     <form class="card ed" id="bz-form" autocomplete="off" style="border:0">
-      <div class="mute small">${T("Only the time is shared, not the reason.")}</div>
-      <label>${T("Date")}<input id="bz-date" type="date" value="${esc(b.date)}" required></label>
-      <label class="chk"><input type="checkbox" id="bz-all" ${b.all ? "checked" : ""}>${T("All day")}</label>
-      ${b.all ? "" : `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <label>${T("From")}<input id="bz-start" type="time" value="${esc(b.start)}" required></label>
-        <label>${T("To")}<input id="bz-end" type="time" value="${esc(b.end)}" required></label></div>`}
-      <label>${T("Repeat")}<select id="bz-rep">
-        ${[["none","Does not repeat"],["daily","Every day"],["weekdays","Every weekday (Mon–Fri)"],["weekly","Every week"]].map(([v, l]) => `<option value="${v}" ${b.rep === v ? "selected" : ""}>${T(l)}</option>`).join("")}</select></label>
-      ${b.rep && b.rep !== "none" ? `<label>${T("Until")}<input id="bz-until" type="date" value="${esc(b.until || "")}" required></label>` : ""}
-      <button class="wide primary" type="submit">${T("Save")}</button>
+      <div class="mute small">${esc(bzDayLabel(b.date))} · ${T("Step 1: what is this day mostly like?")}</div>
+      <div class="bz-chips">${BZ_BASE_LABEL.map(([v, l]) => `<button type="button" data-bzbase="${v}" class="${b.base === v ? "on" : ""}">${T(l)}</button>`).join("")}</div>
+      <div class="mute small" style="margin-top:12px">${T("Step 2: any times that are different?")}</div>
+      ${b.ex.map((x, i) => `<div class="bz-ex"><input type="time" data-bzs="${i}" value="${esc(x.s)}" aria-label="${T("From")}"><span>${T("to")}</span><input type="time" data-bze="${i}" value="${esc(x.e)}" aria-label="${T("To")}">
+        <div class="bz-right"><div class="bz-seg"><button type="button" data-bzexb="${i}" data-v="1" class="${x.busy ? "on" : ""}">${T("Not free")}</button><button type="button" data-bzexb="${i}" data-v="0" class="${x.busy ? "" : "on fr"}">${T("Free")}</button></div>
+        <button type="button" class="bz-x" data-bzexrm="${i}" aria-label="${T("Remove")}">×</button></div></div>`).join("")}
+      <button type="button" class="bz-add" data-bzexadd="1">＋ ${T("Add a time")}</button>
+      <div class="mute small" style="margin-top:6px">${T("Preview")}</div>
+      <div class="bz-bar">${parts.map(([a, c, k]) => `<div style="flex:${c - a};background:${k ? "#E4E6EE" : "#DCF3E3"};color:${k ? "#4a4f63" : "#1E7A3C"}">${c - a >= 120 ? T(k ? "Not free" : "Free") : ""}</div>`).join("")}</div>
+      <div class="bz-ticks"><span>8</span><span>10</span><span>12</span><span>14</span><span>16</span><span>18</span><span>20</span><span>22</span></div>
+      <label class="chk"><input type="checkbox" id="bz-weekly" ${b.weekly ? "checked" : ""}>${T("Same every {day}", {day: wdName})}</label>
+      ${b.weekly ? `<label>${T("Until")}<input id="bz-until" type="date" value="${esc(b.until || addDays(b.date, 27))}" required></label>` : ""}
+      <div class="mute small" style="margin-top:8px">${T("Only the time is shared, not the reason.")}</div>
+      <button class="wide primary" type="submit" style="margin-top:10px">${T("Save")}</button>
       <button class="wide" type="button" data-busy="cancel">${T("Cancel")}</button>
     </form>
-    <h2>${T("Upload a screenshot")}</h2>
-    <div class="card">
-      <div class="mute small">${T("@shotupload")}</div>
-      <label class="wide" style="display:block;text-align:center;border-radius:14px;font-weight:600;padding:12px;margin-top:10px;background:var(--accent);color:#fff;cursor:pointer">${T("Choose screenshots")}<input id="bz-shot" type="file" accept="image/*" multiple hidden></label>
-      <div id="bz-shot-st" class="mute small" style="margin-top:6px"></div>
-    </div>
     <h2>${T("Import from a calendar file")}</h2>
     <div class="card">
       <div class="mute small">${T("@icsimport")}</div>
@@ -1508,8 +1567,18 @@ $("main").addEventListener("click", async ev => {
     render(lastData); show("overview"); return;
   }
   if (b.dataset.busy) {
-    if (b.dataset.busy === "new") { busyEdit = {date: cal.sel, all: false, start: "09:00", end: "18:00", rep: "none", until: ""}; rerenderSchedule(); window.scrollTo(0, 0); return; }
+    if (b.dataset.busy === "new") { busyEdit = bzLoad(cal.sel || todayKL()); rerenderSchedule(); window.scrollTo(0, 0); return; }
     if (b.dataset.busy === "cancel") { busyEdit = null; rerenderSchedule(); return; }
+  }
+  if (busyEdit && (b.dataset.bzday || b.dataset.bzweek || b.dataset.bzbase || b.dataset.bzexadd || b.dataset.bzexrm !== undefined || b.dataset.bzexb !== undefined)) {
+    bzRead();
+    if (b.dataset.bzday) busyEdit = bzLoad(b.dataset.bzday);
+    else if (b.dataset.bzweek) busyEdit = bzLoad(addDays(busyEdit.date, +b.dataset.bzweek));
+    else if (b.dataset.bzbase) busyEdit.base = b.dataset.bzbase;
+    else if (b.dataset.bzexadd) busyEdit.ex.push({s: "18:00", e: "19:00", busy: busyEdit.base === "free"});
+    else if (b.dataset.bzexrm !== undefined) busyEdit.ex.splice(+b.dataset.bzexrm, 1);
+    else { const x = busyEdit.ex[+b.dataset.bzexb]; if (x) x.busy = b.dataset.v === "1"; }
+    rerenderSchedule(); return;
   }
   if (b.dataset.shotdel || b.dataset.shotok) {
     const id = b.dataset.shotdel || b.dataset.shotok, sh = (lastData.busyShots || []).find(x => x.id === id); if (!sh) return; b.disabled = true;
@@ -1754,11 +1823,9 @@ $("main").addEventListener("submit", async ev => {
   catch (e) { toast("Could not save. Try again."); btn.disabled = false; }
 }, true);
 $("main").addEventListener("change", ev => {
-  if (ev.target.id !== "bz-all" && ev.target.id !== "bz-rep") return;
-  busyEdit.date = $("bz-date").value; busyEdit.all = $("bz-all").checked; busyEdit.rep = $("bz-rep").value;
-  if ($("bz-until")) busyEdit.until = $("bz-until").value;
-  if (busyEdit.rep !== "none" && !busyEdit.until && busyEdit.date) busyEdit.until = addDays(busyEdit.date, 27);
-  if ($("bz-start")) { busyEdit.start = $("bz-start").value; busyEdit.end = $("bz-end").value; }
+  if (!busyEdit || !(ev.target.id === "bz-weekly" || ev.target.dataset.bzs !== undefined || ev.target.dataset.bze !== undefined)) return;
+  bzRead();
+  if (busyEdit.weekly && !busyEdit.until) busyEdit.until = addDays(busyEdit.date, 27);
   rerenderSchedule();
 });
 $("main").addEventListener("change", async ev => {
@@ -1801,23 +1868,25 @@ $("main").addEventListener("submit", async ev => {
   if (ev.target.id !== "bz-form") return;
   ev.preventDefault(); ev.stopImmediatePropagation();
   const me = findMe(lastData); if (!me) return;
-  const date = $("bz-date").value, all = $("bz-all").checked;
-  const start = all ? "00:00" : $("bz-start").value, end = all ? "24:00" : $("bz-end").value;
-  if (!date) { toast("Date is needed."); return; }
-  if (!all && end <= start) { toast("End time is before the start time."); return; }
-  const rp = $("bz-rep").value, until = $("bz-until") ? $("bz-until").value : "";
-  if (rp !== "none" && (!until || until < date)) { toast("Pick an end date after the start date."); return; }
-  if (rp !== "none" && until > addDays(date, 180)) { toast("Repeats can go up to 6 months."); return; }
-  const dates = [];
-  for (let x = date; x <= (rp === "none" ? date : until); x = addDays(x, 1)) {
-    const wd = new Date(x + "T12:00:00Z").getUTCDay(), w0 = new Date(date + "T12:00:00Z").getUTCDay();
-    if (rp === "none" || rp === "daily" || (rp === "weekdays" && wd >= 1 && wd <= 5) || (rp === "weekly" && wd === w0)) dates.push(x);
+  bzRead();
+  const date = busyEdit.date, weekly = busyEdit.weekly, until = busyEdit.until || "";
+  for (const x of busyEdit.ex) {
+    if (!x.s || !x.e) { toast("Fill in both times, or remove that row."); return; }
+    if (x.e !== "00:00" && x.e <= x.s) { toast("End time is before the start time."); return; }
   }
-  if (!dates.length) { toast("No days match. Check the dates."); return; }
+  if (weekly && (!until || until < date)) { toast("Pick an end date after the start date."); return; }
+  if (weekly && until > addDays(date, 180)) { toast("Repeats can go up to 6 months."); return; }
+  const dates = [];
+  for (let x = date; x <= (weekly ? until : date); x = addDays(x, 7)) dates.push(x);
+  const blocks = bzBlocks(busyEdit).map(([a, c]) => [minToHm(a), minToHm(c)]);
   const btn = ev.target.querySelector("button[type=submit]"); btn.disabled = true;
   try {
-    const base = Date.now().toString(36), rid = rp === "none" ? null : "r" + base;
-    const d = await publish(x => { x.busy = x.busy || []; dates.forEach((dt, k) => { const o = {who: me.name, date: dt, start, end, src: "manual", id: base + k}; if (rid) o.rep = rid; x.busy.push(o); }); }, dates.length > 1 ? "Add repeating busy time" : "Add busy time");
+    const base = Date.now().toString(36), rid = weekly ? "r" + base : null;
+    const d = await publish(x => {
+      // This day's schedule replaces what you typed in before for the same day(s); synced or imported times stay.
+      x.busy = (x.busy || []).filter(y => !(y.who === me.name && y.src === "manual" && dates.includes(y.date)));
+      dates.forEach((dt, k) => blocks.forEach(([start, end], j) => { const o = {who: me.name, date: dt, start, end, src: "manual", id: base + k + "_" + j}; if (rid) o.rep = rid; x.busy.push(o); }));
+    }, dates.length > 1 ? "Update weekly schedule" : "Update schedule");
     busyEdit = null; cal.sel = date; cal.y = +date.slice(0, 4); cal.m = +date.slice(5, 7) - 1; showApp(d); show("schedule"); toast("Saved.");
   } catch (e) { toast(e.message === "notoken" ? "Uploads need team updates turned on." : "Could not save. Try again."); btn.disabled = false; }
 }, true);
